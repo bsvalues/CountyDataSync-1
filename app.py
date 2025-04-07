@@ -4,6 +4,8 @@ Flask web application for CountyDataSync ETL process.
 import os
 import logging
 import time
+import json
+import glob
 from datetime import datetime
 try:
     import pandas as pd
@@ -823,8 +825,51 @@ def run_job(job_id):
         job.status = 'completed'
         job.end_time = datetime.utcnow()
         
+        # Run data quality analysis if job completed successfully
+        try:
+            from etl.integrate_quality_heatmap import analyze_etl_output
+            
+            # Create a performance metric for data quality analysis
+            quality_start = time.time()
+            metric = PerformanceMetric(
+                job_id=job.id,
+                stage='data_quality',
+                memory_usage=get_memory_usage_value(),
+                cpu_usage=get_cpu_usage(),
+                elapsed_time=time.time() - start_time,
+                description="Starting data quality analysis"
+            )
+            db.session.add(metric)
+            db.session.commit()
+            
+            # Run the analysis
+            report_paths = analyze_etl_output(job)
+            
+            # Record completion metric
+            quality_time = time.time() - quality_start
+            metric = PerformanceMetric(
+                job_id=job.id,
+                stage='data_quality',
+                memory_usage=get_memory_usage_value(),
+                cpu_usage=get_cpu_usage(),
+                elapsed_time=quality_time,
+                description="Data quality analysis completed"
+            )
+            db.session.add(metric)
+            db.session.commit()
+            
+            # Log the results
+            if report_paths:
+                logger.info(f"Data quality analysis completed for job {job.id}. Reports: {report_paths}")
+            else:
+                logger.warning(f"Data quality analysis produced no reports for job {job.id}")
+        
+        except Exception as quality_error:
+            # Don't fail the job if quality analysis fails
+            logger.error(f"Data quality analysis failed for job {job.id}: {str(quality_error)}", exc_info=True)
+        
     except Exception as e:
-        # Handle errors
+        # Handle errors in the main ETL process
         logger.error(f"ETL job {job.id} failed: {str(e)}", exc_info=True)
         job.status = 'failed'
         job.end_time = datetime.utcnow()
@@ -852,7 +897,140 @@ def job_detail(job_id):
     if job.working_db_path and os.path.exists(job.working_db_path):
         job.working_db_size = check_file_size(job.working_db_path)
     
-    return render_template('job_detail.html', job=job, metrics=metrics)
+    # Check if a data quality heatmap exists for this job
+    has_quality_report = False
+    if job.stats_db_path:
+        job_output_dir = os.path.join('output', f"job_{job.id}")
+        if os.path.exists(job_output_dir) and len(os.listdir(job_output_dir)) > 0:
+            has_quality_report = True
+    
+    return render_template('job_detail.html', job=job, metrics=metrics, has_quality_report=has_quality_report)
+
+@app.route('/data-quality-heatmap')
+def data_quality_heatmap():
+    """
+    Display the interactive data quality heatmap.
+    """
+    # Get job_id from query parameter, default to the latest completed job
+    job_id = request.args.get('job_id', None)
+    
+    if job_id:
+        job = ETLJob.query.get(job_id)
+    else:
+        # Get the latest completed job
+        job = ETLJob.query.filter_by(status='completed').order_by(ETLJob.end_time.desc()).first()
+    
+    if not job:
+        # No completed jobs found
+        return render_template(
+            'data_quality_heatmap.html',
+            heatmap_data=None
+        )
+    
+    # Get previous and next job IDs for navigation
+    previous_job = ETLJob.query.filter(
+        ETLJob.status == 'completed',
+        ETLJob.id < job.id
+    ).order_by(ETLJob.id.desc()).first()
+    
+    next_job = ETLJob.query.filter(
+        ETLJob.status == 'completed',
+        ETLJob.id > job.id
+    ).order_by(ETLJob.id.asc()).first()
+    
+    # Check if a heatmap data file exists for this job
+    heatmap_file = None
+    if job.stats_db_path:
+        # Look for a heatmap file in the same directory
+        stats_dir = os.path.dirname(job.stats_db_path)
+        heatmap_files = glob.glob(os.path.join(stats_dir, 'parcel_data_quality_heatmap_*.json'))
+        if heatmap_files:
+            # Use the latest heatmap file
+            heatmap_file = sorted(heatmap_files)[-1]
+    
+    heatmap_data = None
+    column_details = {}
+    
+    if heatmap_file and os.path.exists(heatmap_file):
+        try:
+            with open(heatmap_file, 'r') as f:
+                heatmap_data = json.load(f)
+            
+            # Extract column details from the full quality report
+            quality_report_file = heatmap_file.replace('_heatmap_', '_')
+            if os.path.exists(quality_report_file):
+                with open(quality_report_file, 'r') as f:
+                    quality_report = json.load(f)
+                    column_details = quality_report.get('columns', {})
+        except Exception as e:
+            app.logger.error(f"Error loading heatmap data: {str(e)}")
+    
+    # If we still don't have heatmap data, generate mock data for the UI
+    # This would be replaced with real data in production
+    if not heatmap_data:
+        # Get column names from a sample file or database
+        columns = []
+        data = []
+        metrics = ['completeness', 'validity', 'consistency', 'outliers', 'overall_score']
+    else:
+        columns = heatmap_data.get('columns', [])
+        metrics = heatmap_data.get('metrics', [])
+        data = heatmap_data.get('data', [])
+    
+    # Get completion metrics
+    complete_records = 0
+    complete_records_percentage = 0
+    record_count = job.record_count or 0
+    analysis_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+    
+    # Helper function for Jinja to compute colors
+    def get_color(value):
+        """Generate a color from red (0%) to blue (100%)"""
+        # Ensure value is between 0 and 100
+        value = max(0, min(100, value))
+        
+        if value < 25:
+            # Red to orange (0-25%)
+            r = 178
+            g = 24 + (value / 25) * (96 - 24)
+            b = 43
+        elif value < 50:
+            # Orange to yellow (25-50%)
+            r = 178 + (value - 25) / 25 * (244 - 178)
+            g = 96 + (value - 25) / 25 * (165 - 96)
+            b = 43 + (value - 25) / 25 * (130 - 43)
+        elif value < 75:
+            # Yellow to light blue (50-75%)
+            r = 244 - (value - 50) / 25 * (244 - 146)
+            g = 165 + (value - 50) / 25 * (197 - 165)
+            b = 130 + (value - 50) / 25 * (222 - 130)
+        else:
+            # Light blue to dark blue (75-100%)
+            r = 146 - (value - 75) / 25 * (146 - 33)
+            g = 197 - (value - 75) / 25 * (197 - 102)
+            b = 222 - (value - 75) / 25 * (222 - 172)
+            
+        return f'rgb({int(r)}, {int(g)}, {int(b)})'
+    
+    return render_template(
+        'data_quality_heatmap.html',
+        job_id=job.id if job else None,
+        job_name=job.job_name if job else None,
+        record_count=record_count,
+        complete_records=complete_records,
+        complete_records_percentage=complete_records_percentage,
+        analysis_timestamp=analysis_timestamp,
+        heatmap_data=heatmap_data is not None,
+        columns=columns,
+        metrics=metrics,
+        data=data,
+        column_details=column_details,
+        get_color=get_color,
+        has_previous_job=previous_job is not None,
+        has_next_job=next_job is not None,
+        previous_job_id=previous_job.id if previous_job else None,
+        next_job_id=next_job.id if next_job else None
+    )
 
 @app.route('/performance-dashboard')
 def performance_dashboard():

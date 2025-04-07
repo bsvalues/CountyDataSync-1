@@ -1,130 +1,96 @@
 """
-Utility functions for the CountyDataSync ETL process.
+Utility functions for the ETL process.
 """
 import os
-import logging
-import time
 import psutil
-import datetime
+from datetime import datetime
 
-logger = logging.getLogger(__name__)
+
+def ensure_directory_exists(directory):
+    """
+    Ensure that a directory exists, creating it if necessary.
+    
+    Args:
+        directory (str): Path to the directory to check/create
+    
+    Returns:
+        str: Path to the directory
+    """
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    return directory
+
+
+def get_timestamp():
+    """
+    Get a formatted timestamp for use in filenames.
+    
+    Returns:
+        str: Formatted timestamp (YYYYMMDD_HHMMSS)
+    """
+    return datetime.now().strftime('%Y%m%d_%H%M%S')
+
 
 def get_memory_usage():
     """
     Get the current memory usage of the process.
     
     Returns:
-        str: Memory usage in MB
-    """
-    process = psutil.Process(os.getpid())
-    memory_info = process.memory_info()
-    memory_mb = memory_info.rss / 1024 / 1024
-    return f"{memory_mb:.2f} MB"
-
-def get_memory_usage_value():
-    """
-    Get the current memory usage as a float value.
-    
-    Returns:
         float: Memory usage in MB
     """
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
-    memory_mb = memory_info.rss / 1024 / 1024
-    return memory_mb
+    return memory_info.rss / (1024 * 1024)  # Convert to MB
+
+# Alias for backward compatibility
+get_memory_usage_value = get_memory_usage
+
 
 def get_cpu_usage():
     """
-    Get the current CPU usage of the process.
+    Get the current CPU usage.
     
     Returns:
-        float: CPU usage percentage (0-100)
+        float: CPU usage as a percentage
     """
-    process = psutil.Process(os.getpid())
-    return process.cpu_percent(interval=0.1)
+    return psutil.cpu_percent(interval=0.1)
 
-def format_elapsed_time(start_time):
+
+def format_elapsed_time(seconds):
     """
-    Format the elapsed time in a human-readable format.
+    Format elapsed time in a human-readable format.
     
     Args:
-        start_time (float): Start time in seconds since epoch
+        seconds (float): Time in seconds
         
     Returns:
-        str: Formatted elapsed time
+        str: Formatted time string
     """
-    elapsed_seconds = time.time() - start_time
-    
-    if elapsed_seconds < 60:
-        return f"{elapsed_seconds:.2f} seconds"
-    elif elapsed_seconds < 3600:
-        minutes = int(elapsed_seconds // 60)
-        seconds = elapsed_seconds % 60
-        return f"{minutes} minutes {seconds:.2f} seconds"
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    elif seconds < 3600:
+        minutes = int(seconds / 60)
+        remaining_seconds = seconds % 60
+        return f"{minutes}m {remaining_seconds:.2f}s"
     else:
-        hours = int(elapsed_seconds // 3600)
-        minutes = int((elapsed_seconds % 3600) // 60)
-        seconds = elapsed_seconds % 60
-        return f"{hours} hours {minutes} minutes {seconds:.2f} seconds"
+        hours = int(seconds / 3600)
+        remaining = seconds % 3600
+        minutes = int(remaining / 60)
+        remaining_seconds = remaining % 60
+        return f"{hours}h {minutes}m {remaining_seconds:.2f}s"
 
-def get_timestamp():
-    """
-    Get the current timestamp in a formatted string.
-    
-    Returns:
-        str: Formatted timestamp
-    """
-    return datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
-def ensure_directory_exists(directory_path):
-    """
-    Ensure that a directory exists, creating it if necessary.
-    
-    Args:
-        directory_path (str): Path to the directory
-    """
-    if not os.path.exists(directory_path):
-        os.makedirs(directory_path)
-        logger.debug(f"Created directory: {directory_path}")
-
-def create_output_filename(base_name, extension, timestamp=False):
-    """
-    Create an output filename with optional timestamp.
-    
-    Args:
-        base_name (str): Base name for the file
-        extension (str): File extension
-        timestamp (bool): Whether to include a timestamp
-        
-    Returns:
-        str: Output filename
-    """
-    if timestamp:
-        ts = get_timestamp()
-        return f"{base_name}_{ts}.{extension}"
-    else:
-        return f"{base_name}.{extension}"
 
 def check_file_size(file_path):
     """
-    Check the size of a file.
+    Check the size of a file in KB.
     
     Args:
         file_path (str): Path to the file
         
     Returns:
-        str: File size in a human-readable format
+        float: File size in KB
     """
     if os.path.exists(file_path):
         size_bytes = os.path.getsize(file_path)
-        
-        if size_bytes < 1024:
-            return f"{size_bytes} bytes"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes/1024:.2f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes/(1024*1024):.2f} MB"
-        else:
-            return f"{size_bytes/(1024*1024*1024):.2f} GB"
-    else:
-        return "File not found"
+        return size_bytes / 1024  # Convert to KB
+    return 0

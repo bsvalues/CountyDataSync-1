@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Quality Heatmap - CountyDataSync ETL</title>
+    <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
+    <style>
+        .navbar-brand { font-weight: bold; }
+        .card { margin-bottom: 1.5rem; }
+        .heatmap-cell {
+            width: 100%;
+            height: 100%;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .heatmap-cell:hover {
+            transform: scale(1.05);
+        }
+        .heatmap-legend {
+            display: flex;
+            margin-top: 1rem;
+            align-items: center;
+        }
+        .legend-gradient {
+            height: 20px;
+            width: 200px;
+            margin: 0 10px;
+            background: linear-gradient(to right, 
+                rgb(178, 24, 43),
+                rgb(214, 96, 77),
+                rgb(244, 165, 130),
+                rgb(253, 219, 199),
+                rgb(209, 229, 240),
+                rgb(146, 197, 222),
+                rgb(67, 147, 195),
+                rgb(33, 102, 172)
+            );
+            border-radius: 4px;
+        }
+        .metric-details {
+            margin-top: 20px;
+            display: none;
+        }
+        .active-cell {
+            outline: 3px solid var(--bs-primary);
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg bg-body-tertiary mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="/">CountyDataSync ETL</a>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/new-job">New ETL Job</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/performance-dashboard">Performance</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/data-quality-heatmap">Data Quality</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Interactive Data Quality Heatmap</h1>
+            <div>
+                <a href="/" class="btn btn-outline-secondary me-2">Back to Dashboard</a>
+                {% if job_id %}
+                <a href="/job/{{ job_id }}" class="btn btn-outline-primary">View Job Details</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="mb-0">Data Quality Overview</h4>
+                    </div>
+                    <div class="card-body">
+                        {% if not heatmap_data %}
+                            <div class="alert alert-info">
+                                No data quality information available. Please run an ETL job first.
+                            </div>
+                        {% else %}
+                            <div class="row mb-3">
+                                <div class="col-md-8">
+                                    <p><strong>Job:</strong> {{ job_name }}</p>
+                                    <p><strong>Record Count:</strong> {{ record_count }}</p>
+                                    <p><strong>Complete Records:</strong> {{ complete_records }} ({{ complete_records_percentage }}%)</p>
+                                    <p><strong>Analysis Time:</strong> {{ analysis_timestamp }}</p>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="d-grid gap-2">
+                                        {% if has_previous_job %}
+                                        <a href="/data-quality-heatmap?job_id={{ previous_job_id }}" class="btn btn-outline-secondary">View Previous Job</a>
+                                        {% endif %}
+                                        {% if has_next_job %}
+                                        <a href="/data-quality-heatmap?job_id={{ next_job_id }}" class="btn btn-outline-secondary">View Next Job</a>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="heatmap-container">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 200px;">Column</th>
+                                            {% for metric in metrics %}
+                                            <th>{{ metric|capitalize }}</th>
+                                            {% endfor %}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for column in columns %}
+                                        <tr>
+                                            <td>{{ column }}</td>
+                                            {% for i in range(metrics|length) %}
+                                            <td>
+                                                <div 
+                                                    class="heatmap-cell" 
+                                                    style="background-color: {{ get_color(data[loop.parent.index0][i]) }};"
+                                                    data-column="{{ column }}" 
+                                                    data-metric="{{ metrics[i] }}"
+                                                    data-value="{{ data[loop.parent.index0][i] }}"
+                                                    data-index="{{ loop.parent.index0 }}-{{ i }}"
+                                                    title="{{ metrics[i]|capitalize }}: {{ data[loop.parent.index0][i] }}%"
+                                                >&nbsp;</div>
+                                            </td>
+                                            {% endfor %}
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+
+                                <div class="heatmap-legend">
+                                    <span>0%</span>
+                                    <div class="legend-gradient"></div>
+                                    <span>100%</span>
+                                </div>
+                            </div>
+
+                            <div class="metric-details card mt-4" id="metric-details">
+                                <div class="card-header">
+                                    <h5 class="mb-0">Detailed Metrics: <span id="detail-title"></span></h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div id="metric-primary-stats"></div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div id="metric-secondary-stats"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="mb-0">Data Quality Metrics</h4>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>Completeness:</strong> Percentage of non-null values in a column.</p>
+                        <p><strong>Validity:</strong> Percentage of valid values that meet expected formats and constraints.</p>
+                        <p><strong>Consistency:</strong> Uniformity of the data patterns across records.</p>
+                        <p><strong>Outliers:</strong> Percentage of values that fall within expected ranges.</p>
+                        <p><strong>Overall Score:</strong> Combined quality score based on all metrics.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="mb-0">How to Use</h4>
+                    </div>
+                    <div class="card-body">
+                        <p>Click on any colored cell in the heatmap to view detailed metrics for that column and quality dimension.</p>
+                        <p>Colors indicate quality scores from 0% (red) to 100% (blue).</p>
+                        <p>Use the navigation buttons to compare data quality across different ETL jobs.</p>
+                        <p>Hover over cells to see the exact quality score percentage.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="mt-5 py-3 bg-body-tertiary">
+        <div class="container text-center">
+            <p class="mb-0">CountyDataSync ETL System &copy; 2025</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const cells = document.querySelectorAll('.heatmap-cell');
+            const detailsContainer = document.getElementById('metric-details');
+            const detailTitle = document.getElementById('detail-title');
+            const primaryStats = document.getElementById('metric-primary-stats');
+            const secondaryStats = document.getElementById('metric-secondary-stats');
+            
+            if (!cells.length) return;
+            
+            // Column details loaded from server
+            const columnDetails = {{ column_details|tojson }};
+            
+            // Handle cell clicks
+            cells.forEach(cell => {
+                cell.addEventListener('click', function() {
+                    // Reset all cells
+                    cells.forEach(c => c.classList.remove('active-cell'));
+                    
+                    // Highlight current cell
+                    this.classList.add('active-cell');
+                    
+                    const column = this.getAttribute('data-column');
+                    const metric = this.getAttribute('data-metric');
+                    const value = this.getAttribute('data-value');
+                    
+                    detailTitle = `${column} (${metric} - ${value}%)`;
+                    
+                    // Get column details from server data
+                    const details = columnDetails[column] || {};
+                    
+                    // Build HTML for primary stats
+                    let primaryHTML = '';
+                    let secondaryHTML = '';
+                    
+                    if (metric === 'completeness') {
+                        primaryHTML += `<p><strong>Null Count:</strong> ${details.null_count || 0}</p>`;
+                        primaryHTML += `<p><strong>Null Percentage:</strong> ${details.null_percentage?.toFixed(2) || 0}%</p>`;
+                    } 
+                    else if (metric === 'validity') {
+                        if (details.empty_strings_percentage !== undefined) {
+                            primaryHTML += `<p><strong>Empty Strings:</strong> ${details.empty_strings || 0}</p>`;
+                            primaryHTML += `<p><strong>Empty Percentage:</strong> ${details.empty_strings_percentage?.toFixed(2) || 0}%</p>`;
+                        }
+                        if (details.max_length !== undefined) {
+                            primaryHTML += `<p><strong>Max Length:</strong> ${details.max_length}</p>`;
+                            primaryHTML += `<p><strong>Min Length:</strong> ${details.min_length}</p>`;
+                        }
+                    }
+                    else if (metric === 'consistency') {
+                        if (details.unique_values !== undefined) {
+                            primaryHTML += `<p><strong>Unique Values:</strong> ${details.unique_values}</p>`;
+                            primaryHTML += `<p><strong>Unique Percentage:</strong> ${details.unique_percentage?.toFixed(2) || 0}%</p>`;
+                        }
+                    }
+                    else if (metric === 'outliers') {
+                        if (details.outliers_count !== undefined) {
+                            primaryHTML += `<p><strong>Outlier Count:</strong> ${details.outliers_count}</p>`;
+                            primaryHTML += `<p><strong>Outlier Percentage:</strong> ${details.outliers_percentage?.toFixed(2) || 0}%</p>`;
+                        }
+                    }
+                    
+                    // Add general column stats to secondary column
+                    if (details.min !== undefined) {
+                        secondaryHTML += `<p><strong>Min Value:</strong> ${details.min}</p>`;
+                        secondaryHTML += `<p><strong>Max Value:</strong> ${details.max}</p>`;
+                        secondaryHTML += `<p><strong>Mean:</strong> ${details.mean?.toFixed(2)}</p>`;
+                        secondaryHTML += `<p><strong>Median:</strong> ${details.median}</p>`;
+                    } else if (details.most_common_values) {
+                        secondaryHTML += `<p><strong>Most Common Values:</strong></p>`;
+                        secondaryHTML += `<ul>`;
+                        for (const [value, count] of Object.entries(details.most_common_values).slice(0, 3)) {
+                            secondaryHTML += `<li>${value}: ${count} occurrences</li>`;
+                        }
+                        secondaryHTML += `</ul>`;
+                    }
+                    
+                    primaryStats.innerHTML = primaryHTML;
+                    secondaryStats.innerHTML = secondaryHTML;
+                    detailsContainer.style.display = 'block';
+                });
+            });
+            
+            // Initially select the first cell
+            if (cells.length > 0) {
+                cells[0].click();
+            }
+        });
+    </script>
+</body>
+</html>
