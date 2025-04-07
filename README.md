@@ -18,6 +18,7 @@ CountyDataSync's primary goal is to extract data from a master SQL Server (the M
 - **Performance Monitoring**: Track memory usage, CPU utilization, and processing time
 - **Web Interface**: Manage ETL jobs through a Flask web application
 - **Standalone Mode**: Run as a command-line application or package as a standalone executable
+- **CI/CD Integration**: Automated testing, packaging, and deployment pipeline
 
 ## Prerequisites
 
@@ -54,6 +55,20 @@ CountyDataSync's primary goal is to extract data from a master SQL Server (the M
    python build_executable.py
    ```
 3. Find the executable in the `dist_package` directory
+
+### Method 3: Use the CI/CD Pipeline
+
+The project includes a GitHub Actions workflow for automated building, testing, and packaging:
+
+1. Push your changes to the main branch
+2. The CI/CD pipeline automatically:
+   - Runs all tests
+   - Packages the application with PyInstaller
+   - Archives the executable as an artifact
+   - Performs database backups (on scheduled runs)
+   - Can be configured to deploy to production
+
+See the [CI/CD Guide](CI_CD_GUIDE.md) for detailed information on setting up and customizing the pipeline.
 
 ## Configuration
 

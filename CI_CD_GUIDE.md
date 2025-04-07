@@ -1,43 +1,93 @@
-# CountyDataSync CI/CD Integration Guide
+# CountyDataSync CI/CD Guide
 
-This guide explains how to integrate CountyDataSync into a CI/CD pipeline using GitHub Actions, including automated testing, packaging, error monitoring, and scheduled maintenance tasks.
+This guide outlines the Continuous Integration and Continuous Deployment (CI/CD) process for the CountyDataSync ETL application.
 
-## 1. Automated Error Monitoring with Sentry
+## CI/CD Goals
 
-### Sentry Integration
+1. **Automated Testing**: Validate code quality and functionality
+2. **Automated Builds**: Create standalone executables with PyInstaller
+3. **Deployment Process**: Streamline deployment to production servers
+4. **Monitoring**: Track application health and performance
+5. **Backup Strategy**: Automate database backups
 
-1. Install the Sentry SDK
-2. Initialize Sentry in your code (sync.py or app.py)
-3. Configure environment variables in GitHub repository secrets
+## GitHub Actions Workflow
 
-## 2. Scheduled Database Backups
+The CI/CD pipeline is implemented using GitHub Actions. The workflow file is located at `.github/workflows/ci-cd.yml`.
 
-Create a backup script (backup_script.py) to copy your database files to a backup directory with timestamps.
+### Build, Test, and Package Job
 
-## 3. Health Checks and Data Integrity Testing
+This job runs on every push to the main branch and on pull requests:
 
-Create a health check script (health_check.py) to verify database integrity by checking if tables exist and have records.
+1. Set up Python environment
+2. Install dependencies
+3. Generate application icon
+4. Generate PyInstaller spec file
+5. Run unit and integration tests
+6. Package with PyInstaller
+7. Run ETL with test data
+8. Run health check
+9. Upload executable as artifact
 
-## 4. GitHub Actions CI/CD Workflow
+### Backup Job
 
-Create a workflow file (.github/workflows/main.yml) with jobs for:
-- Building, testing, and packaging the application
-- Running scheduled backups
-- Optional deployment to production
+This job runs on a schedule (daily at 2 AM UTC):
 
-## 5. Setting Up GitHub Repository Secrets
+1. Run ETL with test data (to ensure fresh data for backup)
+2. Run backup script
+3. Upload backup as artifact
 
-Configure secrets in your GitHub repository for:
-- Sentry DSN
-- Database credentials
-- Server access (if deploying)
+### Deployment Job (Optional)
 
-## 6. Continuous Integration Best Practices
+This job can be uncommented and customized for your deployment process:
 
-- Test regularly on every push
-- Keep secrets secure
-- Monitor build times
-- Set up artifact retention policies
-- Configure notifications for failures
+1. Download executable artifact
+2. Deploy to production server using SCP
+3. Restart service on server
 
-By implementing this CI/CD pipeline, you'll automate testing, packaging, and maintenance tasks for CountyDataSync, ensuring reliable and consistent deployments.
+## Setting Up Secrets
+
+The following secrets should be configured in GitHub:
+
+- `DEPLOY_USER`: SSH username for deployment
+- `DEPLOY_HOST`: SSH hostname for deployment
+- `DEPLOY_PATH`: Deployment directory on server
+- `SSH_PRIVATE_KEY`: SSH private key for deployment
+
+## Local CI/CD Testing
+
+You can test the CI/CD workflow locally before pushing:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run tests
+pytest tests/
+
+# Generate icon and spec file
+python generate_icon.py
+python generate_spec.py
+
+# Build executable
+python build_executable.py
+
+# Run health check
+python health_check.py
+
+# Run backup script
+python backup_script.py
+```
+
+## Maintenance Tasks
+
+- **Database Backup**: Daily automatic backups via scheduled workflow
+- **Health Checks**: Run on every build and can be scheduled separately
+- **Performance Monitoring**: Integrated into the ETL process
+- **Log Rotation**: Implemented in deployed environment
+
+## Troubleshooting CI/CD Issues
+
+- Check workflow logs in GitHub Actions
+- Review test failure details
+- Verify environment variables and secrets
+- Test build process locally

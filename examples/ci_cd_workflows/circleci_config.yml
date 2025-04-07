@@ -1,0 +1,127 @@
+# Example CircleCI Configuration for CountyDataSync
+# Place this file as .circleci/config.yml in your repository
+
+version: 2.1
+
+orbs:
+  python: circleci/python@2.0
+
+jobs:
+  build-and-test:
+    docker:
+      - image: cimg/python:3.9
+    steps:
+      - checkout
+      - python/install-packages:
+          pkg-manager: pip
+          packages:
+            - pytest
+            - pyinstaller
+            - python-dotenv
+          args: -r requirements.txt
+      - run:
+          name: Create Directories
+          command: |
+            mkdir -p logs
+            mkdir -p output
+            mkdir -p build
+            mkdir -p dist
+      - run:
+          name: Generate Icon
+          command: python generate_icon.py
+      - run:
+          name: Generate Spec File
+          command: python generate_spec.py
+      - run:
+          name: Run Tests
+          command: python -m pytest tests/ --maxfail=1 --disable-warnings -q
+      - run:
+          name: Build Executable
+          command: python build_executable.py
+      - run:
+          name: Run ETL with Test Data
+          command: |
+            export USE_TEST_DATA=true
+            python sync.py --test-data
+      - run:
+          name: Run Health Check
+          command: python health_check.py
+      - store_artifacts:
+          path: dist/
+          destination: executable
+      - store_artifacts:
+          path: logs/
+          destination: logs
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist
+
+  backup:
+    docker:
+      - image: cimg/python:3.9
+    steps:
+      - checkout
+      - python/install-packages:
+          pkg-manager: pip
+          args: -r requirements.txt
+      - run:
+          name: Create Directories
+          command: |
+            mkdir -p logs
+            mkdir -p output
+            mkdir -p backup
+      - run:
+          name: Run ETL with Test Data
+          command: |
+            export USE_TEST_DATA=true
+            python sync.py --test-data
+      - run:
+          name: Run Backup Script
+          command: python backup_script.py
+      - store_artifacts:
+          path: backup/
+          destination: database-backups
+
+  # Deployment job - uncomment and customize for your deployment
+  # deploy:
+  #   docker:
+  #     - image: cimg/base:2023.03
+  #   steps:
+  #     - checkout
+  #     - attach_workspace:
+  #         at: .
+  #     - run:
+  #         name: Deploy to Production
+  #         command: |
+  #           # Setup SSH
+  #           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+  #           chmod 600 ~/.ssh/id_rsa
+  #           
+  #           # Deploy using SCP
+  #           scp -o StrictHostKeyChecking=no dist/CountyDataSync* $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH
+  #           
+  #           # Optional: Restart service
+  #           ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "cd $DEPLOY_PATH && ./restart_service.sh"
+
+workflows:
+  version: 2
+  build-test-deploy:
+    jobs:
+      - build-and-test
+      # - deploy:
+      #     requires:
+      #       - build-and-test
+      #     filters:
+      #       branches:
+      #         only: main
+              
+  nightly-backup:
+    triggers:
+      - schedule:
+          cron: "0 2 * * *"  # 2 AM UTC every day
+          filters:
+            branches:
+              only: main
+    jobs:
+      - backup

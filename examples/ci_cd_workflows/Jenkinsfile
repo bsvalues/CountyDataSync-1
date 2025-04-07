@@ -1,0 +1,122 @@
+// Example Jenkinsfile for CountyDataSync
+// Place this file as Jenkinsfile in your repository root
+
+pipeline {
+    agent {
+        docker {
+            image 'python:3.9'
+        }
+    }
+    
+    environment {
+        USE_TEST_DATA = 'true'
+    }
+    
+    stages {
+        stage('Setup') {
+            steps {
+                sh 'pip install -r requirements.txt'
+                sh 'pip install pytest pyinstaller python-dotenv'
+                sh 'mkdir -p logs output build dist'
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                sh 'python -m pytest tests/ --junitxml=test-results.xml'
+            }
+            post {
+                always {
+                    junit 'test-results.xml'
+                }
+            }
+        }
+        
+        stage('Build Icon and Spec') {
+            steps {
+                sh 'python generate_icon.py'
+                sh 'python generate_spec.py'
+            }
+        }
+        
+        stage('Package') {
+            steps {
+                sh 'python build_executable.py'
+            }
+        }
+        
+        stage('Run ETL') {
+            steps {
+                sh 'python sync.py --test-data'
+            }
+        }
+        
+        stage('Health Check') {
+            steps {
+                sh 'python health_check.py'
+            }
+        }
+        
+        stage('Archive') {
+            steps {
+                archiveArtifacts artifacts: 'dist/CountyDataSync*', fingerprint: true
+                archiveArtifacts artifacts: 'logs/*', fingerprint: true
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo 'Pipeline execution completed'
+        }
+        success {
+            echo 'Pipeline succeeded'
+        }
+        failure {
+            echo 'Pipeline failed'
+        }
+    }
+}
+
+// Separate backup job to be defined in Jenkins UI or in a separate Jenkinsfile
+// It should be scheduled to run nightly
+/*
+pipeline {
+    agent {
+        docker {
+            image 'python:3.9'
+        }
+    }
+    
+    environment {
+        USE_TEST_DATA = 'true'
+    }
+    
+    stages {
+        stage('Setup') {
+            steps {
+                sh 'pip install -r requirements.txt'
+                sh 'mkdir -p logs output backup'
+            }
+        }
+        
+        stage('Run ETL') {
+            steps {
+                sh 'python sync.py --test-data'
+            }
+        }
+        
+        stage('Backup') {
+            steps {
+                sh 'python backup_script.py'
+            }
+        }
+        
+        stage('Archive') {
+            steps {
+                archiveArtifacts artifacts: 'backup/**', fingerprint: true
+            }
+        }
+    }
+}
+*/

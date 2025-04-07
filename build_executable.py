@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Build script for creating a standalone executable of CountyDataSync using PyInstaller.
 
@@ -5,57 +6,110 @@ Usage:
     python build_executable.py
 """
 import os
-import subprocess
 import sys
-import time
+import subprocess
+import logging
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def check_prerequisites():
+    """Check if all prerequisites are installed."""
+    try:
+        import PyInstaller
+        logger.info(f"PyInstaller version: {PyInstaller.__version__}")
+        return True
+    except ImportError:
+        logger.error("PyInstaller is not installed. Please install it using 'pip install pyinstaller'.")
+        return False
+
+def generate_spec_file():
+    """Generate or update the PyInstaller spec file."""
+    if not os.path.exists('generate_spec.py'):
+        logger.error("generate_spec.py not found. Cannot generate spec file.")
+        return False
+    
+    logger.info("Generating spec file...")
+    result = subprocess.run([sys.executable, 'generate_spec.py'], 
+                            capture_output=True, text=True)
+    
+    if result.returncode == 0:
+        logger.info(result.stdout.strip())
+        return True
+    else:
+        logger.error(f"Error generating spec file: {result.stderr.strip()}")
+        return False
+
+def build_executable():
+    """Build the executable using PyInstaller."""
+    spec_file = 'countydatasync.spec'
+    if not os.path.exists(spec_file):
+        logger.warning(f"Spec file {spec_file} not found.")
+        success = generate_spec_file()
+        if not success:
+            logger.error("Failed to generate spec file. Cannot continue.")
+            return False
+    
+    # Create build and dist directories if they don't exist
+    Path('build').mkdir(exist_ok=True)
+    Path('dist').mkdir(exist_ok=True)
+    
+    logger.info("Building executable with PyInstaller...")
+    cmd = [
+        'pyinstaller', 
+        '--clean',                # Clean PyInstaller cache
+        '--noconfirm',            # Replace output directory without confirmation
+        spec_file                 # Use the spec file
+    ]
+    
+    try:
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if process.returncode == 0:
+            # Find the executable in the dist directory
+            dist_dir = Path('dist')
+            executables = list(dist_dir.glob('CountyDataSync*'))
+            
+            if executables:
+                executable_path = executables[0]
+                logger.info(f"Build successful! Executable created: {executable_path}")
+                
+                # Make the executable executable on Unix-like systems
+                if not sys.platform.startswith('win'):
+                    executable_path.chmod(executable_path.stat().st_mode | 0o111)
+                    logger.info(f"Made executable: {executable_path}")
+                
+                return True
+            else:
+                logger.error("Build completed but no executable was found in the dist directory.")
+                return False
+        else:
+            logger.error(f"PyInstaller failed with error: {process.stderr.strip()}")
+            return False
+    
+    except FileNotFoundError:
+        logger.error("PyInstaller command not found. Make sure it's installed and in your PATH.")
+        return False
+    except Exception as e:
+        logger.error(f"An error occurred during build: {e}")
+        return False
 
 def main():
     """Run the PyInstaller build process."""
-    print("Starting CountyDataSync executable build...")
+    logger.info("Starting build process for CountyDataSync executable")
     
-    # First, generate the spec file if it doesn't exist
-    if not os.path.exists('sync_executable.spec'):
-        print("Generating spec file...")
-        try:
-            from generate_spec import generate_spec_file
-            generate_spec_file()
-        except Exception as e:
-            print(f"Error generating spec file: {str(e)}")
-            sys.exit(1)
+    # Check if PyInstaller is installed
+    if not check_prerequisites():
+        return 1
     
-    # Run PyInstaller
-    print("Running PyInstaller...")
-    start_time = time.time()
-    try:
-        subprocess.run(
-            ["pyinstaller", "--clean", "sync_executable.spec"],
-            check=True
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"PyInstaller failed with error code {e.returncode}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error running PyInstaller: {str(e)}")
-        sys.exit(1)
-    
-    build_time = time.time() - start_time
-    print(f"Build completed in {build_time:.2f} seconds")
-    
-    # Check if the executable was created
-    executable_path = os.path.join('dist', 'CountyDataSync')
-    if os.path.exists(executable_path):
-        print(f"Executable created at: {executable_path}")
-        
-        # Get file size
-        size_bytes = os.path.getsize(executable_path)
-        size_mb = size_bytes / (1024 * 1024)
-        print(f"Executable size: {size_mb:.2f} MB")
-        
-        print("\nYou can now run the executable with:")
-        print(f"./dist/CountyDataSync")
+    # Build the executable
+    if build_executable():
+        logger.info("Build process completed successfully!")
+        return 0
     else:
-        print("Executable not found. Build may have failed.")
-        sys.exit(1)
+        logger.error("Build process failed!")
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

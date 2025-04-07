@@ -1,102 +1,108 @@
+#!/usr/bin/env python3
 """
 Generate a simple icon for CountyDataSync
 """
 import os
 import sys
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def generate_icon(size=256, filename='generated-icon.png'):
     """Generate a simple icon for CountyDataSync."""
-    # Create a new image with a white background
-    img = Image.new('RGBA', (size, size), color=(0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
+    logger.info(f"Generating icon with size {size}x{size}")
     
-    # Draw a blue circle for the background
-    circle_radius = size // 2 - 4
-    circle_center = (size // 2, size // 2)
-    circle_bbox = (
-        circle_center[0] - circle_radius,
-        circle_center[1] - circle_radius,
-        circle_center[0] + circle_radius,
-        circle_center[1] + circle_radius
-    )
-    draw.ellipse(circle_bbox, fill=(41, 128, 185, 255))
+    # Create a new image with white background
+    image = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
     
-    # Draw a stylized "CDS" text or map icon
-    # Use a simple polygon to represent a map/parcel
-    map_width = int(size * 0.5)
-    map_height = int(size * 0.4)
-    map_top_left = (
-        circle_center[0] - map_width // 2,
-        circle_center[1] - map_height // 2
+    # Draw a filled circle for the background
+    circle_color = (41, 128, 185)  # Blue
+    padding = int(size * 0.1)
+    draw.ellipse(
+        [(padding, padding), (size - padding, size - padding)],
+        fill=circle_color
     )
     
-    # Draw a stylized map/document icon
-    draw.rectangle(
-        (map_top_left[0], map_top_left[1], 
-         map_top_left[0] + map_width, map_top_left[1] + map_height),
-        fill=(236, 240, 241, 255),
-        outline=(52, 73, 94, 255),
-        width=int(size * 0.02)
-    )
+    # Draw a map-like grid pattern
+    grid_color = (255, 255, 255, 128)  # Semi-transparent white
+    grid_spacing = size // 8
     
-    # Add grid lines to represent a map
-    line_spacing = map_height // 3
-    for i in range(1, 3):
-        # Horizontal lines
-        draw.line(
-            (map_top_left[0], map_top_left[1] + i * line_spacing,
-             map_top_left[0] + map_width, map_top_left[1] + i * line_spacing),
-            fill=(52, 73, 94, 255),
-            width=int(size * 0.01)
-        )
+    # Horizontal lines
+    for y in range(grid_spacing, size, grid_spacing):
+        draw.line([(padding, y), (size - padding, y)], fill=grid_color, width=2)
     
-    line_spacing = map_width // 3
-    for i in range(1, 3):
-        # Vertical lines
-        draw.line(
-            (map_top_left[0] + i * line_spacing, map_top_left[1],
-             map_top_left[0] + i * line_spacing, map_top_left[1] + map_height),
-            fill=(52, 73, 94, 255),
-            width=int(size * 0.01)
-        )
+    # Vertical lines
+    for x in range(grid_spacing, size, grid_spacing):
+        draw.line([(x, padding), (x, size - padding)], fill=grid_color, width=2)
     
-    # Add a synchronize arrow icon
-    arrow_size = int(size * 0.15)
-    arrow_center = (
-        circle_center[0] + map_width // 2 + arrow_size // 2,
-        circle_center[1] + map_height // 2 + arrow_size // 2
-    )
+    # Draw "CDS" text in the center
+    text_color = (255, 255, 255, 230)  # Almost opaque white
     
-    # Draw circular arrow
-    draw.arc(
-        (arrow_center[0] - arrow_size, arrow_center[1] - arrow_size,
-         arrow_center[0] + arrow_size, arrow_center[1] + arrow_size),
-        start=0, end=270,
-        fill=(46, 204, 113, 255),
-        width=int(size * 0.06)
-    )
+    # Try to use a system font, or fall back to a default font
+    try:
+        # Attempt to find a suitable font
+        font_paths = [
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+            '/System/Library/Fonts/Helvetica.ttc',
+            'C:\\Windows\\Fonts\\Arial.ttf',
+            '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf'
+        ]
+        
+        font = None
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                font = ImageFont.truetype(font_path, size=int(size * 0.4))
+                break
+        
+        if font is None:
+            # Fall back to default font
+            font = ImageFont.load_default()
+            logger.warning("Using default font as no system fonts were found")
+    except Exception as e:
+        # If font loading fails, use the default font
+        font = ImageFont.load_default()
+        logger.warning(f"Error loading font: {e}. Using default font instead.")
     
-    # Draw arrow head
-    head_size = int(size * 0.08)
-    draw.polygon(
-        [
-            (arrow_center[0], arrow_center[1] - arrow_size),
-            (arrow_center[0] - head_size, arrow_center[1] - arrow_size + head_size),
-            (arrow_center[0] + head_size, arrow_center[1] - arrow_size + head_size)
-        ],
-        fill=(46, 204, 113, 255)
-    )
+    # Calculate text position to center it
+    text = "CDS"
+    try:
+        # For newer versions of Pillow
+        text_bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+    except AttributeError:
+        # For older versions of Pillow
+        text_width, text_height = draw.textsize(text, font=font)
+    
+    text_position = ((size - text_width) // 2, (size - text_height) // 2)
+    draw.text(text_position, text, fill=text_color, font=font)
     
     # Save the image
-    img.save(filename)
-    print(f"Icon generated: {filename}")
-    
-    return filename
+    try:
+        image.save(filename)
+        logger.info(f"Icon saved as {filename}")
+        return os.path.abspath(filename)
+    except Exception as e:
+        logger.error(f"Error saving icon: {e}")
+        return None
 
 if __name__ == "__main__":
-    try:
-        generate_icon()
-    except Exception as e:
-        print(f"Error: {str(e)}")
+    # Parse command-line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate an icon for CountyDataSync")
+    parser.add_argument("--size", type=int, default=256, help="Icon size in pixels (default: 256)")
+    parser.add_argument("--output", type=str, default="generated-icon.png", help="Output filename (default: generated-icon.png)")
+    args = parser.parse_args()
+    
+    # Generate the icon
+    icon_path = generate_icon(size=args.size, filename=args.output)
+    
+    if icon_path:
+        print(f"Icon generated successfully: {icon_path}")
+        sys.exit(0)
+    else:
+        print("Failed to generate icon")
         sys.exit(1)
