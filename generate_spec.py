@@ -1,68 +1,71 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """
 Generate a PyInstaller spec file for packaging CountyDataSync.
 """
+
 import os
 import sys
-import logging
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 def generate_spec_file():
     """Generate a PyInstaller spec file."""
-    logger.info("Generating PyInstaller spec file")
+    # Check if PyInstaller is installed
+    try:
+        import PyInstaller
+    except ImportError:
+        print("PyInstaller is not installed. Please install it with 'pip install pyinstaller'.")
+        sys.exit(1)
     
-    # Check if icon exists
-    icon_path = 'generated-icon.png'
+    # Define paths
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    icon_path = os.path.join(current_dir, "generated-icon.png")
+    
+    # Ensure icon exists
     if not os.path.exists(icon_path):
-        logger.warning(f"Icon file {icon_path} not found. Trying to generate it.")
         try:
-            import generate_icon
-            icon_path = generate_icon.generate_icon()
-            if not icon_path:
-                logger.warning("Failed to generate icon. Spec file will not include an icon.")
-                icon_path = None
+            from generate_icon import generate_icon
+            generate_icon()
+            print(f"Generated icon at {icon_path}")
         except ImportError:
-            logger.warning("Could not import generate_icon module. Spec file will not include an icon.")
+            print("Warning: Could not generate icon. Icon will not be included in the executable.")
             icon_path = None
-    
-    # Determine platform-specific file extension
-    if sys.platform.startswith('win'):
-        extension = '.exe'
-    elif sys.platform.startswith('darwin'):
-        extension = '.app'
-    else:
-        extension = ''
-    
-    # Create the spec file content
-    icon_line = f"icon='{icon_path}'," if icon_path else ""
-    
+
+    # Define the spec file content
     spec_content = f"""# -*- mode: python ; coding: utf-8 -*-
 
 block_cipher = None
 
 a = Analysis(
-    ['sync.py'],
-    pathex=[],
+    ['sync_executable.py'],
+    pathex=['{current_dir}'],
     binaries=[],
     datas=[
-        ('etl', 'etl'),
-        ('config.py', '.'),
+        ('.env.example', '.'),
         ('README.md', '.'),
-        ('logs', 'logs'),
-        ('output', 'output'),
+        ('INSTALLATION.md', '.'),
     ],
     hiddenimports=[
         'pandas',
         'numpy',
+        'sqlalchemy',
         'pyodbc',
+        'psutil',
+        'dotenv',
+        'flask',
+        'werkzeug',
         'geopandas',
         'shapely',
-        'sqlite3',
-        'dotenv',
-        'psutil',
+        'etl',
+        'etl.extract',
+        'etl.transform',
+        'etl.load',
+        'etl.sync',
+        'etl.data_quality',
+        'etl.data_validation',
+        'etl.delta_sync',
     ],
     hookspath=[],
     hooksconfig={{}},
@@ -74,11 +77,7 @@ a = Analysis(
     noarchive=False,
 )
 
-pyz = PYZ(
-    a.pure, 
-    a.zipped_data,
-    cipher=block_cipher
-)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
@@ -100,28 +99,18 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    {icon_line}
+    {'icon=' + repr(icon_path) + ',' if icon_path else ''}
 )
 """
-    
+
     # Write the spec file
-    spec_file = 'countydatasync.spec'
-    try:
-        with open(spec_file, 'w') as f:
-            f.write(spec_content)
-        logger.info(f"Spec file generated successfully: {spec_file}")
-        return os.path.abspath(spec_file)
-    except Exception as e:
-        logger.error(f"Error writing spec file: {e}")
-        return None
+    spec_file = os.path.join(current_dir, "countydatasync.spec")
+    with open(spec_file, "w") as f:
+        f.write(spec_content)
+    
+    print(f"Generated spec file at {spec_file}")
+    return spec_file
+
 
 if __name__ == "__main__":
-    # Generate the spec file
-    spec_path = generate_spec_file()
-    
-    if spec_path:
-        print(f"PyInstaller spec file generated successfully: {spec_path}")
-        sys.exit(0)
-    else:
-        print("Failed to generate PyInstaller spec file")
-        sys.exit(1)
+    generate_spec_file()

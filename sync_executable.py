@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """
 Standalone executable for CountyDataSync ETL process.
 
@@ -16,111 +18,130 @@ Options:
     --config PATH        Path to custom configuration file
     --help               Show this help message and exit
 """
+
+import argparse
+import logging
 import os
 import sys
 import time
-import argparse
-import logging
-import traceback
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
+import platform
+import datetime
 
-# Configure basic logging before imports
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger('CountyDataSync')
 
 def get_application_path() -> str:
     """Get the path of the application."""
     if getattr(sys, 'frozen', False):
-        # Running as compiled executable
-        return os.path.dirname(sys.executable)
+        # Running as bundled executable
+        app_path = os.path.dirname(sys.executable)
     else:
         # Running as script
-        return os.path.dirname(os.path.abspath(__file__))
+        app_path = os.path.dirname(os.path.abspath(__file__))
+    return app_path
+
 
 def configure_logging(verbose: bool = False, log_dir: Optional[str] = None) -> None:
     """Configure logging with file handler."""
-    # Determine log directory
+    # Set the log level
+    log_level = logging.DEBUG if verbose else logging.INFO
+    
+    # Create the logs directory if it doesn't exist
     if log_dir is None:
         app_path = get_application_path()
         log_dir = os.path.join(app_path, 'logs')
     
-    # Create log directory if it doesn't exist
     os.makedirs(log_dir, exist_ok=True)
     
-    # Set log level
-    log_level = logging.DEBUG if verbose else logging.INFO
-    logger.setLevel(log_level)
-    
-    # Create log file with timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # Create a log file with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     log_file = os.path.join(log_dir, f'etl_process_{timestamp}.log')
     
-    # Add file handler
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-    logger.addHandler(file_handler)
+    # Configure logging
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
     
-    logger.info(f"Logging to file: {log_file}")
-    logger.info(f"Log level: {logging.getLevelName(log_level)}")
+    logging.info(f"Logging initialized. Log file: {log_file}")
+
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description='CountyDataSync ETL Process')
-    parser.add_argument('--batch-size', type=int, default=1000,
-                        help='Size of batches for data extraction (default: 1000)')
-    parser.add_argument('--output-dir', type=str, default='output',
-                        help='Directory for output files (default: output)')
-    parser.add_argument('--test-data', action='store_true',
-                        help='Use test data instead of SQL Server')
-    parser.add_argument('--verbose', action='store_true',
-                        help='Enable verbose logging')
-    parser.add_argument('--config', type=str,
-                        help='Path to custom configuration file')
+    parser = argparse.ArgumentParser(
+        description='CountyDataSync ETL Process',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=1000,
+        help='Size of batches for data extraction'
+    )
+    
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='output',
+        help='Directory for output files'
+    )
+    
+    parser.add_argument(
+        '--test-data',
+        action='store_true',
+        help='Use test data instead of SQL Server'
+    )
+    
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Enable verbose logging'
+    )
+    
+    parser.add_argument(
+        '--config',
+        type=str,
+        help='Path to custom configuration file'
+    )
+    
     return parser.parse_args()
+
 
 def configure_environment(args: argparse.Namespace) -> None:
     """Configure environment based on command-line arguments."""
-    # Set environment variables based on arguments
+    # Set environment variables for testing
     if args.test_data:
         os.environ['USE_TEST_DATA'] = 'true'
-        logger.info("Using test data instead of SQL Server")
+        logging.info("Using test data mode")
     
-    # Load custom configuration if provided
-    if args.config and os.path.exists(args.config):
-        try:
-            import configparser
-            config = configparser.ConfigParser()
-            config.read(args.config)
-            
-            # Set environment variables from config
-            if 'Database' in config:
-                if 'MSSQL_SERVER' in config['Database']:
-                    os.environ['MSSQL_SERVER'] = config['Database']['MSSQL_SERVER']
-                if 'MSSQL_DATABASE' in config['Database']:
-                    os.environ['MSSQL_DATABASE'] = config['Database']['MSSQL_DATABASE']
-                if 'MSSQL_USERNAME' in config['Database']:
-                    os.environ['MSSQL_USERNAME'] = config['Database']['MSSQL_USERNAME']
-                if 'MSSQL_PASSWORD' in config['Database']:
-                    os.environ['MSSQL_PASSWORD'] = config['Database']['MSSQL_PASSWORD']
-                if 'DATABASE_URL' in config['Database']:
-                    os.environ['DATABASE_URL'] = config['Database']['DATABASE_URL']
-            
-            logger.info(f"Loaded configuration from {args.config}")
-        except Exception as e:
-            logger.error(f"Error loading configuration file: {e}")
+    # Set output directory
+    app_path = get_application_path()
+    output_dir = os.path.join(app_path, args.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    logging.info(f"Output directory: {output_dir}")
     
-    # Create output directory if it doesn't exist
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(exist_ok=True)
-    logger.info(f"Output directory: {output_dir.absolute()}")
+    # Load configuration if specified
+    if args.config:
+        if os.path.exists(args.config):
+            # Load custom configuration
+            from dotenv import load_dotenv
+            load_dotenv(args.config)
+            logging.info(f"Loaded configuration from {args.config}")
+        else:
+            logging.warning(f"Configuration file not found: {args.config}")
+    else:
+        # Load default .env if it exists
+        env_path = os.path.join(app_path, '.env')
+        if os.path.exists(env_path):
+            from dotenv import load_dotenv
+            load_dotenv(env_path)
+            logging.info(f"Loaded configuration from {env_path}")
+
 
 def run_etl_process(batch_size: int = 1000, output_dir: str = 'output') -> Dict[str, Any]:
     """
@@ -133,76 +154,86 @@ def run_etl_process(batch_size: int = 1000, output_dir: str = 'output') -> Dict[
     Returns:
         Dictionary with results and paths to output files
     """
+    logging.info("Starting ETL process")
+    
+    # Check if output directory exists, create if needed
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    start_time = time.time()
+    
     try:
-        # Detect if running as packaged executable
-        if getattr(sys, 'frozen', False):
-            # When running as executable, Python's import system works differently
-            # We need to set up the Python path to find our modules
-            app_path = get_application_path()
-            if app_path not in sys.path:
-                sys.path.insert(0, app_path)
-        
-        # Import ETL modules (delayed import to ensure path is set up)
+        # Import the ETL modules
         try:
-            # First try using the standalone module
-            from etl.sync import run_etl
+            from etl.sync import run_etl_pipeline
+            from etl.data_quality import analyze_parcel_data
         except ImportError:
-            # If standalone module not found, try the web app module
-            logger.warning("Standalone ETL module not found, trying web app module.")
-            from app import run_etl
+            # If running as executable with bundled modules
+            logging.info("Using bundled ETL modules")
+            # This should work in the PyInstaller bundle
+            from sync import run_etl_pipeline
+            from data_quality import analyze_parcel_data
         
-        # Run the ETL process
-        logger.info(f"Starting ETL process with batch size {batch_size}")
-        start_time = time.time()
+        # Run the ETL pipeline
+        result = run_etl_pipeline(batch_size=batch_size, output_dir=output_dir)
         
-        result = run_etl(batch_size=batch_size, output_dir=output_dir)
+        # Run data quality analysis
+        if result.get('transformed_data') is not None:
+            quality_results = analyze_parcel_data(result['transformed_data'], output_dir=output_dir)
+            result['quality_report'] = quality_results
         
-        elapsed_time = time.time() - start_time
-        logger.info(f"ETL process completed in {elapsed_time:.2f} seconds")
+        end_time = time.time()
+        result['execution_time'] = end_time - start_time
         
-        # Log output files
-        for key, path in result.items():
-            if isinstance(path, str) and os.path.exists(path):
-                size_kb = os.path.getsize(path) / 1024
-                logger.info(f"  - {key}: {path} ({size_kb:.2f} KB)")
-        
+        logging.info(f"ETL process completed in {result['execution_time']:.2f} seconds")
         return result
     
-    except ImportError as e:
-        logger.error(f"Failed to import ETL modules: {e}")
-        logger.error(f"System path: {sys.path}")
-        raise
     except Exception as e:
-        logger.error(f"Error in ETL process: {e}")
-        logger.error(traceback.format_exc())
-        raise
+        logging.error(f"ETL process failed: {str(e)}", exc_info=True)
+        end_time = time.time()
+        return {
+            'error': str(e),
+            'execution_time': end_time - start_time,
+            'status': 'failed'
+        }
+
 
 def display_summary(result: Dict[str, Any]) -> None:
     """Display a summary of the ETL process results."""
-    print("\n" + "=" * 40)
-    print(" CountyDataSync ETL Process Summary ")
-    print("=" * 40 + "\n")
+    print("\n" + "=" * 60)
+    print("CountyDataSync ETL Process Summary")
+    print("=" * 60)
     
-    if not result:
-        print("ETL process did not return any results.")
-        return
+    if 'error' in result:
+        print(f"\nStatus: Failed")
+        print(f"Error: {result['error']}")
+    else:
+        print(f"\nStatus: Completed")
     
-    # Print output files
-    print("Output Files:")
-    for key, path in result.items():
-        if isinstance(path, str) and os.path.exists(path):
-            size_kb = os.path.getsize(path) / 1024
-            print(f"  - {key}: {path} ({size_kb:.2f} KB)")
+    print(f"Execution Time: {result.get('execution_time', 0):.2f} seconds")
     
-    # Print metrics if available
-    if 'metrics' in result:
-        print("\nPerformance Metrics:")
-        metrics = result['metrics']
-        for key, value in metrics.items():
-            print(f"  - {key}: {value}")
+    if 'record_count' in result:
+        print(f"Records Processed: {result['record_count']}")
     
-    print("\nETL process completed successfully.")
-    print("=" * 40 + "\n")
+    if 'output_files' in result:
+        print("\nOutput Files:")
+        for file_type, file_path in result['output_files'].items():
+            print(f"  - {file_type}: {file_path}")
+    
+    if 'quality_report' in result:
+        print("\nData Quality Report:")
+        quality = result['quality_report']
+        if 'overall_score' in quality:
+            print(f"  Overall Quality Score: {quality['overall_score']:.2f}%")
+        if 'completeness' in quality:
+            print(f"  Completeness: {quality['completeness']:.2f}%")
+        if 'validity' in quality:
+            print(f"  Validity: {quality['validity']:.2f}%")
+        if 'report_file' in quality:
+            print(f"  Detailed Report: {quality['report_file']}")
+    
+    print("\n" + "=" * 60)
+
 
 def main() -> int:
     """Main entry point for the application."""
@@ -210,34 +241,25 @@ def main() -> int:
     args = parse_arguments()
     
     # Configure logging
-    configure_logging(args.verbose)
+    configure_logging(verbose=args.verbose)
     
-    # Show application banner
-    print("\n" + "=" * 40)
-    print(" CountyDataSync ETL Process ")
-    print("=" * 40 + "\n")
+    # Log system information
+    logging.info(f"CountyDataSync ETL Process started")
+    logging.info(f"Python version: {platform.python_version()}")
+    logging.info(f"Platform: {platform.platform()}")
     
-    try:
-        # Configure environment
-        configure_environment(args)
-        
-        # Run the ETL process
-        result = run_etl_process(
-            batch_size=args.batch_size,
-            output_dir=args.output_dir
-        )
-        
-        # Display summary
-        display_summary(result)
-        
-        logger.info("ETL process completed successfully")
-        return 0
+    # Configure environment
+    configure_environment(args)
     
-    except Exception as e:
-        logger.error(f"ETL process failed: {e}")
-        print(f"\nERROR: {e}")
-        print("See log file for details.")
-        return 1
+    # Run the ETL process
+    result = run_etl_process(batch_size=args.batch_size, output_dir=args.output_dir)
+    
+    # Display summary
+    display_summary(result)
+    
+    # Return exit code
+    return 0 if 'error' not in result else 1
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     sys.exit(main())

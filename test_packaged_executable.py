@@ -1,169 +1,189 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """
 Test the packaged executable for CountyDataSync.
 
 This script verifies that the packaged executable works correctly by running it with test data.
 """
-import os
-import sys
-import time
-import tempfile
-import subprocess
-import logging
-import shutil
-from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger('TestPackagedExecutable')
+import os
+import platform
+import subprocess
+import sys
+import tempfile
+import shutil
+import time
+
 
 def find_executable():
     """Find the CountyDataSync executable in the dist directory."""
-    dist_dir = Path('dist')
+    # Get the executable name based on the platform
+    exe_name = 'CountyDataSync' + ('.exe' if platform.system() == 'Windows' else '')
+    exe_path = os.path.join('dist', exe_name)
     
-    if not dist_dir.exists():
-        logger.error("dist directory not found. Build executable first.")
+    if not os.path.exists(exe_path):
+        print(f"Error: Executable not found at {exe_path}")
+        print("You need to build the executable first with 'python build_executable.py'")
         return None
     
-    executables = list(dist_dir.glob('CountyDataSync*'))
-    
-    if not executables:
-        logger.error("No executable found in dist directory. Build executable first.")
-        return None
-    
-    executable = executables[0]
-    logger.info(f"Found executable: {executable}")
-    return executable
+    print(f"Found executable at {exe_path}")
+    return exe_path
+
 
 def create_test_environment():
     """Create a test environment with temporary directories."""
-    test_dir = tempfile.mkdtemp(prefix='countydatasync_test_')
+    print("Creating test environment...")
+    
+    # Create a temporary directory
+    temp_dir = tempfile.mkdtemp(prefix='countydatasync_test_')
+    print(f"Created temporary directory: {temp_dir}")
     
     # Create subdirectories
-    output_dir = os.path.join(test_dir, 'output')
-    logs_dir = os.path.join(test_dir, 'logs')
-    
+    output_dir = os.path.join(temp_dir, 'output')
+    logs_dir = os.path.join(temp_dir, 'logs')
     os.makedirs(output_dir)
     os.makedirs(logs_dir)
     
-    logger.info(f"Created test environment in {test_dir}")
-    
+    # Return paths
     return {
-        'test_dir': test_dir,
+        'temp_dir': temp_dir,
         'output_dir': output_dir,
-        'logs_dir': logs_dir,
+        'logs_dir': logs_dir
     }
+
 
 def run_test(executable, env):
     """Run the executable in test mode."""
-    logger.info("Running executable in test mode...")
+    print("\nRunning test with packaged executable...")
     
-    # Set environment variables for the test
-    test_env = os.environ.copy()
-    test_env['USE_TEST_DATA'] = 'true'
-    
-    # Command to run the executable
+    # Command to run with test data and verbose logging
     cmd = [
         executable,
         '--test-data',
-        '--output-dir', env['output_dir'],
         '--verbose',
+        f'--output-dir={env["output_dir"]}',
+        '--batch-size=100'
     ]
+    
+    # Run the executable
+    print(f"Command: {' '.join(cmd)}")
+    print("-" * 40)
     
     try:
         process = subprocess.run(
             cmd,
-            env=test_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            check=True,
             text=True,
-            timeout=120,  # 2 minute timeout
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
         )
         
-        logger.info(f"Executable returned with code: {process.returncode}")
+        # Print output
+        print(process.stdout)
+        if process.stderr:
+            print("Errors:")
+            print(process.stderr)
         
-        if process.returncode == 0:
-            logger.info("Executable ran successfully")
-            logger.info("Output:")
-            for line in process.stdout.splitlines()[-20:]:  # Show last 20 lines of output
-                logger.info(f"  {line}")
-            return True
-        else:
-            logger.error("Executable failed")
-            logger.error("Error output:")
-            logger.error(process.stderr)
-            return False
+        print("-" * 40)
+        print("Test completed successfully!")
+        return True
     
-    except subprocess.TimeoutExpired:
-        logger.error("Executable timed out after 120 seconds")
+    except subprocess.CalledProcessError as e:
+        print(f"Test failed with error code {e.returncode}:")
+        print(e.stdout)
+        print(e.stderr)
         return False
     
     except Exception as e:
-        logger.error(f"Error running executable: {e}")
+        print(f"Test failed with error: {str(e)}")
         return False
+
 
 def check_output_files(env):
     """Check if output files were created."""
-    logger.info("Checking output files...")
+    print("\nChecking output files...")
     
-    output_dir = Path(env['output_dir'])
+    # Define expected file patterns
+    expected_patterns = [
+        '.gpkg',  # GeoPackage file
+        '.db',    # SQLite database
+        '.csv',   # CSV data file
+        '.json'   # JSON output
+    ]
     
-    # List files in output directory
-    files = list(output_dir.glob('*'))
+    # Check for files in the output directory
+    found_files = []
+    for root, _, files in os.walk(env['output_dir']):
+        for file in files:
+            found_files.append(os.path.join(root, file))
     
-    if not files:
-        logger.error("No output files found")
+    # Check if any expected file types were found
+    found_patterns = []
+    for pattern in expected_patterns:
+        for file in found_files:
+            if file.endswith(pattern):
+                found_patterns.append(pattern)
+                break
+    
+    # Report findings
+    if found_files:
+        print(f"Found {len(found_files)} files in output directory:")
+        for file in found_files:
+            print(f"  - {os.path.basename(file)}")
+        
+        missing_patterns = [p for p in expected_patterns if p not in found_patterns]
+        if missing_patterns:
+            print(f"\nWarning: Could not find files with patterns: {', '.join(missing_patterns)}")
+        
+        return len(found_patterns) > 0
+    else:
+        print("No output files found.")
         return False
-    
-    logger.info(f"Found {len(files)} output files:")
-    for file in files:
-        file_size = file.stat().st_size / 1024  # Convert to KB
-        logger.info(f"  {file.name} ({file_size:.2f} KB)")
-    
-    return True
+
 
 def cleanup(env):
     """Clean up the test environment."""
-    logger.info(f"Cleaning up test environment: {env['test_dir']}")
+    print("\nCleaning up test environment...")
     
     try:
-        shutil.rmtree(env['test_dir'])
-        logger.info("Test environment cleaned up")
+        shutil.rmtree(env['temp_dir'])
+        print(f"Removed temporary directory: {env['temp_dir']}")
     except Exception as e:
-        logger.warning(f"Error cleaning up test environment: {e}")
+        print(f"Warning: Failed to clean up temporary directory: {str(e)}")
+
 
 def main():
     """Main entry point."""
-    logger.info("=== Testing Packaged Executable for CountyDataSync ===")
+    print("=" * 60)
+    print("CountyDataSync Packaged Executable Test")
+    print("=" * 60)
     
     # Find the executable
     executable = find_executable()
     if not executable:
-        return 1
+        sys.exit(1)
     
     # Create test environment
     env = create_test_environment()
     
     try:
-        # Run the test
-        success = run_test(executable, env)
+        # Run test
+        if not run_test(executable, env):
+            print("\nTest failed.")
+            sys.exit(1)
         
-        if success:
-            # Check output files
-            output_files_ok = check_output_files(env)
-            
-            if output_files_ok:
-                logger.info("Test completed successfully!")
-                return 0
-            else:
-                logger.error("Test failed: Output files not found or invalid")
-                return 1
-        else:
-            logger.error("Test failed: Executable returned non-zero exit code")
-            return 1
+        # Check output files
+        if not check_output_files(env):
+            print("\nTest failed: No expected output files found.")
+            sys.exit(1)
+        
+        print("\nAll tests passed! The packaged executable is working correctly.")
     
     finally:
         # Clean up
         cleanup(env)
 
+
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

@@ -3,29 +3,33 @@
 block_cipher = None
 
 a = Analysis(
-    ['sync.py'],  # Main script
-    pathex=[],
+    ['sync_executable.py'],
+    pathex=['/home/runner/workspace'],
     binaries=[],
     datas=[
-        ('etl', 'etl'),  # Include the etl package
-        ('.env.example', '.'),  # Include the example env file
+        ('.env.example', '.'),
+        ('README.md', '.'),
+        ('INSTALLATION.md', '.'),
     ],
     hiddenimports=[
+        'pandas',
+        'numpy',
+        'sqlalchemy',
+        'pyodbc',
+        'psutil',
+        'dotenv',
+        'flask',
+        'werkzeug',
+        'geopandas',
+        'shapely',
         'etl',
         'etl.extract',
         'etl.transform',
         'etl.load',
         'etl.sync',
-        'etl.utils',
-        'etl.test_data',
-        'pandas',
-        'geopandas',
-        'shapely',
-        'numpy',
-        'pyodbc',
-        'sqlalchemy',
-        'dotenv',
-        'psutil',
+        'etl.data_quality',
+        'etl.data_validation',
+        'etl.delta_sync',
     ],
     hookspath=[],
     hooksconfig={},
@@ -37,11 +41,7 @@ a = Analysis(
     noarchive=False,
 )
 
-pyz = PYZ(
-    a.pure, 
-    a.zipped_data,
-    cipher=block_cipher
-)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
@@ -63,5 +63,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='generated-icon.png',
+    icon='/home/runner/workspace/generated-icon.png',
 )

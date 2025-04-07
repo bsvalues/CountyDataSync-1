@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """
 Package CountyDataSync for distribution.
 
@@ -11,209 +13,197 @@ Usage:
 Arguments:
     --version VERSION: Version string to use for the package (default: current date)
 """
-import os
-import sys
-import time
-import shutil
+
 import argparse
-import logging
+import os
+import platform
+import shutil
 import subprocess
+import sys
 from datetime import datetime
-from pathlib import Path
 import zipfile
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger('PackageApplication')
 
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Package CountyDataSync for distribution')
-    parser.add_argument('--version', type=str, 
-                        default=datetime.now().strftime('%Y%m%d'),
-                        help='Version string to use for the package (default: current date)')
+    
+    # Version argument with default to current date
+    default_version = datetime.now().strftime('%Y%m%d')
+    parser.add_argument('--version', type=str, default=default_version,
+                       help='Version string for the package (default: current date)')
+    
     return parser.parse_args()
+
 
 def build_executable():
     """Build the executable using build_executable.py."""
-    logger.info("Building executable...")
-    
-    cmd = [sys.executable, 'build_executable.py']
+    print("Building executable...")
     
     try:
-        process = subprocess.run(cmd, capture_output=True, text=True)
+        # Check if build_executable.py exists
+        if not os.path.exists('build_executable.py'):
+            print("Error: build_executable.py not found.")
+            return False
         
-        if process.returncode == 0:
-            logger.info("Executable built successfully")
+        # Run the build script
+        result = subprocess.run([sys.executable, 'build_executable.py'],
+                               check=True, capture_output=True, text=True)
+        
+        # Check for successful build
+        exe_path = os.path.join('dist', 'CountyDataSync' + ('.exe' if platform.system() == 'Windows' else ''))
+        if os.path.exists(exe_path):
+            print("Executable built successfully!")
             return True
         else:
-            logger.error(f"Error building executable: {process.stderr.strip()}")
+            print("Failed to build executable.")
+            print(result.stdout)
+            print(result.stderr)
             return False
-    except Exception as e:
-        logger.error(f"Error running build_executable.py: {e}")
+    
+    except subprocess.CalledProcessError as e:
+        print(f"Build failed with error code {e.returncode}:")
+        print(e.stdout)
+        print(e.stderr)
         return False
+    except Exception as e:
+        print(f"Build failed with error: {str(e)}")
+        return False
+
 
 def copy_documentation(dist_dir):
     """Copy documentation files to distribution directory."""
-    logger.info("Copying documentation files...")
+    print("Copying documentation...")
     
-    docs = [
+    # List of documentation files to copy
+    doc_files = [
         'README.md',
         'INSTALLATION.md',
-        'PACKAGING.md',
-        'CI_CD_GUIDE.md',
-        'CI_CD_GUIDE_ETL.md',
+        'PACKAGING.txt',
     ]
     
-    for doc in docs:
-        if os.path.exists(doc):
-            try:
-                shutil.copy2(doc, os.path.join(dist_dir, doc))
-                logger.info(f"Copied {doc}")
-            except Exception as e:
-                logger.warning(f"Could not copy {doc}: {e}")
+    # Copy each file if it exists
+    for file in doc_files:
+        if os.path.exists(file):
+            shutil.copy2(file, dist_dir)
+            print(f"Copied {file}")
+        else:
+            print(f"Warning: {file} not found, skipping.")
+
 
 def copy_config_files(dist_dir):
     """Copy configuration files to distribution directory."""
-    logger.info("Copying configuration files...")
+    print("Copying configuration files...")
     
-    # Copy .env.example
+    # Copy .env.example if it exists
     if os.path.exists('.env.example'):
-        try:
-            shutil.copy2('.env.example', os.path.join(dist_dir, '.env.example'))
-            logger.info("Copied .env.example")
-        except Exception as e:
-            logger.warning(f"Could not copy .env.example: {e}")
+        shutil.copy2('.env.example', os.path.join(dist_dir, '.env.example'))
+        print("Copied .env.example")
+    else:
+        # Create a basic .env.example file
+        with open(os.path.join(dist_dir, '.env.example'), 'w') as f:
+            f.write("# CountyDataSync Environment Configuration\n\n")
+            f.write("# Database connection (PostgreSQL or SQLite)\n")
+            f.write("DATABASE_URL=sqlite:///instance/countydatasync.db\n\n")
+            f.write("# SQL Server connection (for data extraction)\n")
+            f.write("MSSQL_SERVER=your_server_address\n")
+            f.write("MSSQL_DATABASE=your_database_name\n")
+            f.write("MSSQL_USERNAME=your_username\n")
+            f.write("MSSQL_PASSWORD=your_password\n\n")
+            f.write("# Set to 'true' to use test data instead of SQL Server\n")
+            f.write("USE_TEST_DATA=false\n")
+        print("Created .env.example")
     
-    # Copy config.py
+    # Copy config.py if it exists
     if os.path.exists('config.py'):
-        try:
-            shutil.copy2('config.py', os.path.join(dist_dir, 'config.py'))
-            logger.info("Copied config.py")
-        except Exception as e:
-            logger.warning(f"Could not copy config.py: {e}")
+        shutil.copy2('config.py', dist_dir)
+        print("Copied config.py")
+
 
 def create_directory_structure(dist_dir):
     """Create necessary directories in the distribution package."""
-    logger.info("Creating directory structure...")
+    print("Creating directory structure...")
     
-    dirs = ['logs', 'output', 'data']
+    # Create directories
+    for directory in ['logs', 'output', 'data']:
+        os.makedirs(os.path.join(dist_dir, directory), exist_ok=True)
+        print(f"Created {directory} directory")
     
-    for d in dirs:
-        dir_path = os.path.join(dist_dir, d)
-        os.makedirs(dir_path, exist_ok=True)
-        logger.info(f"Created directory: {d}")
-    
-    # Add a README file in each directory explaining its purpose
-    with open(os.path.join(dist_dir, 'logs', 'README.txt'), 'w') as f:
-        f.write('This directory contains log files generated by CountyDataSync.\n')
-    
-    with open(os.path.join(dist_dir, 'output', 'README.txt'), 'w') as f:
-        f.write('This directory will contain output files generated by the ETL process.\n')
-    
-    with open(os.path.join(dist_dir, 'data', 'README.txt'), 'w') as f:
-        f.write('Place input data files in this directory for processing.\n')
+    # Create a .keep file in each directory
+    for directory in ['logs', 'output', 'data']:
+        with open(os.path.join(dist_dir, directory, '.keep'), 'w') as f:
+            f.write("# This file ensures the directory is included in the package\n")
+
 
 def create_distribution_package(version):
     """Create distribution package."""
-    logger.info(f"Creating distribution package version {version}...")
+    print("\nCreating distribution package...")
+    
+    # Define paths
+    exe_name = 'CountyDataSync' + ('.exe' if platform.system() == 'Windows' else '')
+    exe_path = os.path.join('dist', exe_name)
+    dist_dir = f'CountyDataSync-{version}'
     
     # Check if executable exists
-    dist_dir = Path('dist')
-    if not dist_dir.exists():
-        logger.error("dist directory not found. Build executable first.")
+    if not os.path.exists(exe_path):
+        print(f"Error: Executable not found at {exe_path}")
         return False
     
-    executables = list(dist_dir.glob('CountyDataSync*'))
-    if not executables:
-        logger.error("No executable found in dist directory. Build executable first.")
-        return False
+    # Create distribution directory
+    if os.path.exists(dist_dir):
+        shutil.rmtree(dist_dir)
+    os.makedirs(dist_dir)
     
-    # Create a temporary directory for the package
-    package_dir = f"CountyDataSync-{version}"
-    if os.path.exists(package_dir):
-        shutil.rmtree(package_dir)
-    os.makedirs(package_dir)
-    
-    # Copy the executable
-    executable_path = executables[0]
-    shutil.copy2(executable_path, os.path.join(package_dir, executable_path.name))
-    logger.info(f"Copied executable to package directory: {executable_path.name}")
-    
-    # Copy documentation
-    copy_documentation(package_dir)
-    
-    # Copy configuration files
-    copy_config_files(package_dir)
+    # Copy executable
+    shutil.copy2(exe_path, os.path.join(dist_dir, exe_name))
+    print(f"Copied executable to {dist_dir}")
     
     # Create directory structure
-    create_directory_structure(package_dir)
+    create_directory_structure(dist_dir)
     
-    # Create a README file
-    with open(os.path.join(package_dir, 'README.txt'), 'w') as f:
-        f.write(f"""
-CountyDataSync ETL System v{version}
-====================================
-
-This package contains the CountyDataSync application for processing county parcel data.
-
-Contents:
-- CountyDataSync executable: Standalone program for running the ETL process
-- logs/: Directory for log files
-- output/: Directory for output files
-- data/: Directory for input data files
-- Documentation files
-
-Usage:
-  ./CountyDataSync --help
-
-For more information, see the included documentation files.
-""")
+    # Copy documentation
+    copy_documentation(dist_dir)
     
-    # Create a zip archive
-    zip_filename = f"{package_dir}.zip"
+    # Copy configuration files
+    copy_config_files(dist_dir)
+    
+    # Create zip archive
+    zip_filename = f'{dist_dir}.zip'
     with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(package_dir):
+        for root, _, files in os.walk(dist_dir):
             for file in files:
                 file_path = os.path.join(root, file)
-                zipf.write(file_path, os.path.relpath(file_path, os.path.dirname(package_dir)))
+                zipf.write(file_path, os.path.relpath(file_path, os.path.dirname(dist_dir)))
     
-    logger.info(f"Created distribution package: {zip_filename}")
-    
-    # Clean up temporary directory
-    shutil.rmtree(package_dir)
-    
-    return zip_filename
+    print(f"\nDistribution package created: {zip_filename}")
+    return True
+
 
 def main():
     """Main entry point."""
+    # Parse arguments
     args = parse_arguments()
     
-    start_time = time.time()
-    logger.info("Starting packaging process for CountyDataSync")
+    print("=" * 60)
+    print(f"CountyDataSync Packaging (Version: {args.version})")
+    print("=" * 60)
     
-    # Build the executable
-    if not build_executable():
-        logger.error("Failed to build executable. Cannot continue.")
-        return 1
+    # Build executable if it doesn't exist
+    exe_path = os.path.join('dist', 'CountyDataSync' + ('.exe' if platform.system() == 'Windows' else ''))
+    if not os.path.exists(exe_path):
+        if not build_executable():
+            print("Aborting package creation due to build failures.")
+            sys.exit(1)
+    else:
+        print(f"Using existing executable at {exe_path}")
     
     # Create distribution package
-    package_file = create_distribution_package(args.version)
-    
-    if package_file:
-        elapsed_time = time.time() - start_time
-        logger.info(f"Packaging process completed in {elapsed_time:.2f} seconds")
-        logger.info(f"Distribution package created: {package_file}")
-        return 0
+    if create_distribution_package(args.version):
+        print("\nPackaging completed successfully!")
     else:
-        logger.error("Failed to create distribution package")
-        return 1
+        print("\nPackaging failed.")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
