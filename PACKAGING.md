@@ -4,38 +4,56 @@ This guide explains how to package the CountyDataSync ETL service as a standalon
 
 ## Prerequisites
 
-- Python 3.7+ installed on your system
+- Python 3.7+ installed
 - CountyDataSync code repository
 - Required packages installed
 
 ## Step 1: Prepare Your Environment
 
-Before packaging, ensure your local development environment is properly configured.
+Before packaging, ensure your environment is properly configured:
 
-## Step 2: Generate Spec File
-
-Create a PyInstaller spec file that defines how to package your application:
-
-1. Run the generator script:
-   `python generate_spec.py`
+1. Verify application functionality:
+   ```
+   python sync.py --test-data
+   ```
    
-   This creates sync_executable.spec with the proper configuration.
+2. Check environment variables
 
-## Step 3: Build the Executable
+## Step 2: Install PyInstaller
 
-1. Run the build script:
-   `python build_executable.py`
-   
-2. The packaged executable will be in the dist directory.
+```
+pip install pyinstaller
+```
+
+## Step 3: Package the Application
+
+Option 1: Use the generator script (Recommended)
+```
+python generate_spec.py
+python build_executable.py
+```
+
+Option 2: Direct PyInstaller command
+```
+pyinstaller --onefile sync.py
+```
 
 ## Step 4: Test the Executable
 
-Run and verify the executable works as expected.
+1. Navigate to the dist directory
+2. Run the executable with test data
+3. Verify functionality
 
 ## Step 5: Deployment
 
-Copy the executable and required files to the target system, and follow the installation guide.
+1. Copy the executable to the target system
+2. Set up environment variables
+3. Create required directories
+4. Run the executable
 
 ## Troubleshooting
 
-Check the logs for detailed error information.
+- Check for missing modules
+- Verify environment variables
+- Test database connectivity
+- Enable debug logging
