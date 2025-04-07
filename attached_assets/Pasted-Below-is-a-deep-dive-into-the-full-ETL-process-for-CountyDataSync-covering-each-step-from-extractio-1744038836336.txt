@@ -1,0 +1,324 @@
+Below is a deep dive into the full ETL process for CountyDataSync, covering each step from extraction through transformation and loading, along with guidance on how to validate each part using your tools (VS Code, SSMS, ArcGIS Pro). This walkthrough will be very detailed so you can follow along even if you’ve never done this before.
+
+⸻
+
+Full ETL Process Overview
+
+CountyDataSync’s primary goal is to take data from your master SQL Server (the MasterParcels table), process it using Python (with Pandas and GeoPandas), and load it into three staging “databases”:
+	•	Geo DB: A GeoPackage file that stores spatial data.
+	•	Stats DB: A SQLite database for aggregated statistics.
+	•	Working DB: A SQLite database for temporary/editable data.
+
+We’ll go through each step in detail.
+
+⸻
+
+Step 1: Data Extraction
+
+a. Connect to SQL Server
+
+What You’ll Do:
+Use the pyodbc library to connect to your master SQL Server and extract data.
+
+Tools:
+	•	SSMS: Use SSMS to understand your database schema (e.g., MasterParcels table structure) before writing the extraction code.
+	•	VS Code: Write and run your Python script.
+
+Code Example (extract.py):
+
+import os
+import pyodbc
+import pandas as pd
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Configuration from environment variables
+SQL_SERVER_CONFIG = {
+    'server': os.getenv('SQL_SERVER_HOST'),
+    'database': os.getenv('SQL_DATABASE'),
+    'username': os.getenv('SQL_USERNAME'),
+    'password': os.getenv('SQL_PASSWORD'),
+    'driver': os.getenv('SQL_DRIVER', '{ODBC Driver 17 for SQL Server}')
+}
+
+def extract_data(batch_size=1000):
+    # Build connection string
+    conn_str = (
+        f"DRIVER={SQL_SERVER_CONFIG['driver']};"
+        f"SERVER={SQL_SERVER_CONFIG['server']};"
+        f"DATABASE={SQL_SERVER_CONFIG['database']};"
+        f"UID={SQL_SERVER_CONFIG['username']};"
+        f"PWD={SQL_SERVER_CONFIG['password']}"
+    )
+    conn = pyodbc.connect(conn_str)
+    query = """
+        SELECT id, owner, use_code, acres, assessed_value, geometry
+        FROM MasterParcels
+        ORDER BY id
+        OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
+    """
+    
+    offset = 0
+    all_batches = []
+    
+    while True:
+        df_batch = pd.read_sql(query, conn, params=[offset, batch_size])
+        if df_batch.empty:
+            break
+        all_batches.append(df_batch)
+        offset += batch_size
+        print(f"Fetched batch with offset {offset}")
+    
+    conn.close()
+    
+    if all_batches:
+        full_df = pd.concat(all_batches, ignore_index=True)
+        print(f"Total records fetched: {len(full_df)}")
+        return full_df
+    else:
+        print("No data fetched.")
+        return pd.DataFrame()
+
+if __name__ == "__main__":
+    df = extract_data()
+    print(df.head())
+
+Validation:
+	•	Run this script in VS Code’s terminal.
+	•	Use SSMS to manually run similar queries to compare and ensure that the fetched data is correct.
+
+⸻
+
+Step 2: Data Transformation
+
+a. Converting WKT to Geometry
+
+What You’ll Do:
+Use Pandas to handle data and GeoPandas to convert the ‘geometry’ column from WKT strings to shapely geometry objects.
+
+Code Example (transform.py):
+
+import pandas as pd
+import geopandas as gpd
+from shapely import wkt
+
+def transform_data(df):
+    # Convert WKT string in the 'geometry' column to shapely geometries
+    df['geometry'] = df['geometry'].apply(wkt.loads)
+    # Convert DataFrame to GeoDataFrame
+    gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
+    return gdf
+
+if __name__ == "__main__":
+    # Assume you already have df from the extraction step
+    from extract import extract_data
+    df = extract_data()
+    if not df.empty:
+        gdf = transform_data(df)
+        print(gdf.head())
+
+Validation:
+	•	Run the transformation script in VS Code.
+	•	Open the resulting GeoDataFrame output in ArcGIS Pro by saving it as a GeoPackage (next step) and verifying that the spatial data renders correctly.
+
+⸻
+
+Step 3: Data Loading
+
+a. Load Spatial Data into GeoPackage (Geo DB)
+
+What You’ll Do:
+Write the transformed GeoDataFrame to a GeoPackage file using GeoPandas.
+
+Code Example (load_geo.py):
+
+import geopandas as gpd
+
+def load_geo_db(gdf, output_file='geo_db.gpkg'):
+    # Write the GeoDataFrame to a GeoPackage file
+    gdf.to_file(output_file, driver='GPKG')
+    print(f"Geo DB created at {output_file}")
+
+if __name__ == "__main__":
+    from transform import transform_data
+    from extract import extract_data
+    df = extract_data()
+    if not df.empty:
+        gdf = transform_data(df)
+        load_geo_db(gdf)
+
+Validation:
+	•	Run this script in VS Code.
+	•	Open the resulting geo_db.gpkg file in ArcGIS Pro to ensure that the spatial data displays correctly.
+
+b. Load Aggregated Data into Stats DB (SQLite)
+
+What You’ll Do:
+Create and populate a SQLite database for aggregated statistics using Python’s sqlite3 module.
+
+Code Example (load_stats.py):
+
+import sqlite3
+import pandas as pd
+
+def create_stats_db(db_file='stats_db.sqlite'):
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS stats (
+            id INTEGER PRIMARY KEY,
+            use_code TEXT,
+            acres REAL,
+            assessed_value REAL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+    print("Stats DB created.")
+
+def load_stats_data(df, db_file='stats_db.sqlite'):
+    conn = sqlite3.connect(db_file)
+    df.to_sql('stats', conn, if_exists='replace', index=False)
+    conn.commit()
+    conn.close()
+    print("Stats data loaded into SQLite.")
+
+if __name__ == "__main__":
+    # Example: using a small DataFrame for testing
+    df_stats = pd.DataFrame({
+        'id': [1, 2],
+        'use_code': ['RES', 'COM'],
+        'acres': [2.5, 1.0],
+        'assessed_value': [230000, 150000]
+    })
+    create_stats_db()
+    load_stats_data(df_stats)
+
+Validation:
+	•	Use DB Browser for SQLite or a similar tool to open stats_db.sqlite and check that the data is present and correct.
+
+c. Load Editable Data into Working DB (SQLite)
+
+What You’ll Do:
+Set up a similar process for a Working DB, which stores temporary or editable data.
+
+Code Example (load_working.py):
+
+import sqlite3
+import pandas as pd
+
+def create_working_db(db_file='working_db.sqlite'):
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS working (
+            id INTEGER PRIMARY KEY,
+            owner TEXT,
+            use_code TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+    print("Working DB created.")
+
+def load_working_data(df, db_file='working_db.sqlite'):
+    conn = sqlite3.connect(db_file)
+    df.to_sql('working', conn, if_exists='replace', index=False)
+    conn.commit()
+    conn.close()
+    print("Working data loaded into SQLite.")
+
+if __name__ == "__main__":
+    # Example: using a small DataFrame for testing
+    df_working = pd.DataFrame({
+        'id': [1, 2],
+        'owner': ['Alice', 'Bob'],
+        'use_code': ['RES', 'COM']
+    })
+    create_working_db()
+    load_working_data(df_working)
+
+Validation:
+	•	Again, use a SQLite viewer to inspect working_db.sqlite for correctness.
+
+⸻
+
+Step 4: Integration into CountyDataSync ETL Process
+
+Combine Steps:
+Integrate the extraction, transformation, and loading steps into your main ETL script (sync.py):
+
+from extract import extract_data
+from transform import transform_data
+from load_geo import load_geo_db
+from load_stats import create_stats_db, load_stats_data
+from load_working import create_working_db, load_working_data
+import pandas as pd
+
+def run_etl():
+    # Extract
+    df = extract_data()
+    if df.empty:
+        print("No data extracted.")
+        return
+
+    # Transform
+    gdf = transform_data(df)
+    
+    # Load Geo DB
+    load_geo_db(gdf)
+    
+    # For Stats and Working DBs, you might prepare different subsets of data
+    df_stats = df[['id', 'use_code', 'acres', 'assessed_value']]
+    df_working = df[['id', 'owner', 'use_code']]
+    
+    # Create and load Stats DB
+    create_stats_db()
+    load_stats_data(df_stats)
+    
+    # Create and load Working DB
+    create_working_db()
+    load_working_data(df_working)
+    
+    print("ETL process completed successfully.")
+
+if __name__ == "__main__":
+    run_etl()
+
+Validation:
+	•	Run the integrated ETL process.
+	•	Verify that geo_db.gpkg, stats_db.sqlite, and working_db.sqlite are created and populated correctly.
+	•	Check the outputs using ArcGIS Pro (for Geo DB) and DB Browser for SQLite (for Stats and Working DB).
+
+⸻
+
+Step 5: Testing and CI/CD Integration
+	•	Local Testing:
+Run each script individually to ensure they work as expected.
+	•	Automated Testing:
+Write additional tests (using pytest) to verify that each part of the process (extraction, transformation, loading) performs correctly.
+	•	CI/CD:
+Integrate these scripts into your CI/CD pipeline (as described in previous steps) to automatically run tests and package your ETL process.
+
+⸻
+
+Summary
+	1.	Geo DB:
+	•	Use GeoPandas to write spatial data to a GeoPackage.
+	•	Validate using ArcGIS Pro.
+	2.	Stats DB and Working DB:
+	•	Create SQLite databases, create tables, and load data using pandas’ to_sql().
+	•	Validate using a SQLite database browser.
+	3.	Integration:
+	•	Combine extraction, transformation, and loading into a unified ETL script (sync.py).
+	•	Test the full ETL flow locally.
+	4.	Next Steps:
+	•	Expand unit/integration tests.
+	•	Integrate the ETL process into your CI/CD pipeline.
+	•	Package the sync service with PyInstaller and document the process.
+
+This step-by-step walkthrough should guide you through setting up and integrating the three staging databases with your CountyDataSync project. You can perform these steps using VS Code for development, SSMS to inspect your master data, and ArcGIS Pro for validating spatial outputs.
+
+Would you like further clarification on any step, more detailed code examples, or guidance on integrating these scripts into your CI/CD workflow?
