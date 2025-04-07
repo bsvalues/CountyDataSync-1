@@ -40,3 +40,7 @@ DEFAULT_CRS = os.getenv('DEFAULT_CRS', 'EPSG:4326')
 
 # Additional settings for performance tuning
 MAX_MEMORY_USAGE_MB = int(os.getenv('MAX_MEMORY_USAGE_MB', '1024'))
+
+# Test data settings
+USE_TEST_DATA = os.getenv('USE_TEST_DATA', 'false').lower() == 'true'
+TEST_DATA_RECORD_COUNT = int(os.getenv('TEST_DATA_RECORD_COUNT', '100'))
