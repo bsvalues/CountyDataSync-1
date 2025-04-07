@@ -1,0 +1,34 @@
+===== CountyDataSync Installation Guide =====
+
+Quick Start Guide:
+-----------------
+
+1. Download the executable for your platform (Windows: CountyDataSync.exe, Mac/Linux: CountyDataSync)
+
+2. Create a .env file in the same directory with your database settings:
+   SQL_SERVER_HOST=your-server
+   SQL_DATABASE=your-database
+   SQL_USERNAME=your-username
+   SQL_PASSWORD=your-password
+   
+   # To use test data instead of connecting to SQL Server:
+   USE_TEST_DATA=true
+   
+3. Run the executable:
+   Windows: CountyDataSync.exe
+   Mac/Linux: ./CountyDataSync
+   
+4. Optional command-line arguments:
+   --test-data          Use test data instead of SQL Server
+   --batch-size 500     Set batch size for extraction (default: 1000)
+   --output-dir PATH    Set output directory path
+   --log-level LEVEL    Set logging level (DEBUG, INFO, WARNING, ERROR)
+
+5. Check the output files in the output directory:
+   - geo_db.gpkg        (GeoPackage spatial database)
+   - stats_db.sqlite    (Statistics database)
+   - working_db.sqlite  (Working data database)
+   
+6. View logs in the logs directory for troubleshooting
+
+For detailed instructions, see INSTALLATION.md

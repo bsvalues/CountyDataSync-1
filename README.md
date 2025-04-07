@@ -10,26 +10,50 @@ CountyDataSync's primary goal is to extract data from a master SQL Server (the M
 2. **Stats DB**: A SQLite database for aggregated statistics
 3. **Working DB**: A SQLite database for temporary/editable data
 
+## Features
+
+- **Extract**: Connect to SQL Server and extract data from the MasterParcels table
+- **Transform**: Process data using Pandas and GeoPandas, including spatial operations
+- **Load**: Create and populate three target databases with processed data
+- **Performance Monitoring**: Track memory usage, CPU utilization, and processing time
+- **Web Interface**: Manage ETL jobs through a Flask web application
+- **Standalone Mode**: Run as a command-line application or package as a standalone executable
+
 ## Prerequisites
 
-- Python 3.x
+- Python 3.10 or later
 - Required Python packages:
   - pandas
   - geopandas
   - pyodbc
-  - sqlite3
+  - sqlalchemy
   - shapely
   - psutil
   - python-dotenv
+  - flask (for web interface)
 
 ## Installation
+
+### Method 1: Run as a Python Application
 
 1. Clone the repository
 2. Install the required packages:
    ```
-   pip install pandas geopandas pyodbc shapely psutil python-dotenv
+   pip install -r requirements.txt
    ```
 3. Create a `.env` file based on the provided `.env.example`
+
+### Method 2: Run as a Standalone Executable
+
+1. Install PyInstaller:
+   ```
+   pip install pyinstaller
+   ```
+2. Build the executable:
+   ```
+   python build_executable.py
+   ```
+3. Find the executable in the `dist_package` directory
 
 ## Configuration
 
