@@ -1,0 +1,352 @@
+# Optimized GitHub Actions Workflow for CountyDataSync ETL Process
+# This workflow is specifically customized for ETL performance and data quality
+
+name: ETL-Optimized CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run data quality checks and delta sync daily
+    - cron: '0 2 * * *'
+    # Run performance monitoring weekly
+    - cron: '0 3 * * 0'
+    # Run database health check and backup every 6 hours
+    - cron: '0 */6 * * *'
+
+jobs:
+  # Quality gate job to run data validations
+  validate-data-quality:
+    name: Data Quality Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8
+
+      - name: Lint with flake8
+        run: |
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Exit-zero treats all errors as warnings
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Run Unit Tests with Coverage
+        run: |
+          pytest --cov=etl tests/ --cov-report=xml
+
+      - name: Upload Coverage Reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+      - name: Run ETL with Test Data and Validate
+        env:
+          USE_TEST_DATA: "true"
+        run: |
+          mkdir -p output logs
+          # Execute ETL process with test data
+          python -c "
+          import os
+          import pandas as pd
+          import geopandas as gpd
+          from etl.extract import extract_data
+          from etl.transform import transform_data, prepare_stats_data
+          from etl.load import load_geo_db, load_stats_data
+          from etl.data_validation import run_all_validations
+          
+          # Run ETL process
+          print('Extracting test data...')
+          df = extract_data()
+          
+          print('Transforming data...')
+          gdf = transform_data(df)
+          stats_df = prepare_stats_data(gdf)
+          
+          print('Loading data to test DBs...')
+          geo_db_path = load_geo_db(gdf, 'output/test_geo.gpkg')
+          stats_db_path = load_stats_data(stats_df, 'output/test_stats.db')
+          
+          print('Running data validation...')
+          validation_results = run_all_validations(
+              parcel_data=df,
+              stats_db_path=stats_db_path,
+              geo_db_path=geo_db_path
+          )
+          
+          # Output validation results
+          print(f'Validation all passed: {validation_results[\"all_passed\"]}')
+          
+          # Write results to a file for artifact storage
+          with open('output/validation_results.txt', 'w') as f:
+              f.write(f'Validation all passed: {validation_results[\"all_passed\"]}\n\n')
+              
+              if 'parcel_data' in validation_results and validation_results['parcel_data']:
+                  f.write('Parcel Data Validation:\n')
+                  f.write(f'  Passed: {validation_results[\"parcel_data\"][\"passed\"]}\n')
+                  f.write(f'  Record count: {validation_results[\"parcel_data\"][\"record_count\"]}\n')
+                  if validation_results['parcel_data']['errors']:
+                      f.write(f'  Errors: {validation_results[\"parcel_data\"][\"errors\"]}\n')
+                  if validation_results['parcel_data']['warnings']:
+                      f.write(f'  Warnings: {validation_results[\"parcel_data\"][\"warnings\"]}\n')
+              
+              if 'stats_db' in validation_results and validation_results['stats_db']:
+                  f.write('\nStats DB Validation:\n')
+                  f.write(f'  Passed: {validation_results[\"stats_db\"][\"passed\"]}\n')
+                  if validation_results['stats_db']['errors']:
+                      f.write(f'  Errors: {validation_results[\"stats_db\"][\"errors\"]}\n')
+                  if validation_results['stats_db']['warnings']:
+                      f.write(f'  Warnings: {validation_results[\"stats_db\"][\"warnings\"]}\n')
+              
+              if 'geo_db' in validation_results and validation_results['geo_db']:
+                  f.write('\nGeo DB Validation:\n')
+                  f.write(f'  Passed: {validation_results[\"geo_db\"][\"passed\"]}\n')
+                  if validation_results['geo_db']['errors']:
+                      f.write(f'  Errors: {validation_results[\"geo_db\"][\"errors\"]}\n')
+                  if validation_results['geo_db']['warnings']:
+                      f.write(f'  Warnings: {validation_results[\"geo_db\"][\"warnings\"]}\n')
+          
+          # Exit with error if validation failed
+          if not validation_results['all_passed']:
+              exit(1)
+          "
+
+      - name: Upload Validation Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: validation-results
+          path: output/validation_results.txt
+
+  # ETL job to run the full ETL process and create artifacts
+  etl-process:
+    name: ETL Process Execution
+    runs-on: ubuntu-latest
+    needs: validate-data-quality
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Create Required Directories
+        run: |
+          mkdir -p output logs ci_cd/reports
+
+      - name: Run ETL with Test Data
+        env:
+          USE_TEST_DATA: "true"
+        run: |
+          python sync.py --test-data --batch-size 2000
+
+      - name: Delta Sync ETL Process
+        env:
+          USE_TEST_DATA: "true"
+        run: |
+          # Run ETL process with delta sync capabilities
+          python -c "
+          import os
+          import pandas as pd
+          import geopandas as gpd
+          from etl.extract import extract_data
+          from etl.transform import transform_data, prepare_stats_data
+          from etl.delta_sync import DeltaSync
+          
+          # Run ETL process
+          print('Extracting test data for delta sync...')
+          df = extract_data()
+          
+          print('Transforming data...')
+          gdf = transform_data(df)
+          stats_df = prepare_stats_data(gdf)
+          
+          print('Running delta sync...')
+          delta_sync = DeltaSync(working_db='output/working_db.sqlite')
+          
+          result = delta_sync.run_delta_sync(
+              df=df,
+              gdf=gdf,
+              stats_df=stats_df,
+              geo_db_path='output/county_parcels.gpkg',
+              stats_db_path='output/stats.db'
+          )
+          
+          print(f'Delta sync completed in {result[\"elapsed_time\"]:.2f} seconds')
+          print(f'Added records: {result[\"added_records\"]}')
+          print(f'Updated records: {result[\"updated_records\"]}')
+          print(f'Unchanged records: {result[\"unchanged_records\"]}')
+          print(f'Deleted records: {result[\"deleted_records\"]}')
+          "
+
+      - name: Run Performance Monitoring
+        run: |
+          # Analyze ETL performance and check for regressions
+          python ci_cd/performance_monitoring.py || true  # Don't fail the build for performance issues
+
+      - name: Run Health Check
+        run: |
+          python health_check.py
+
+      - name: Upload ETL Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: etl-output
+          path: |
+            output/
+            logs/
+            ci_cd/reports/
+
+  package:
+    name: Package for Distribution
+    runs-on: ubuntu-latest
+    needs: etl-process
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate Application Icon
+        run: python generate_icon.py
+
+      - name: Generate Spec File
+        run: python generate_spec.py
+
+      - name: Build Executable
+        run: python build_executable.py
+
+      - name: Test Executable (Linux)
+        run: |
+          chmod +x dist/CountyDataSync
+          dist/CountyDataSync --test-data --no-window
+
+      - name: Upload Executable
+        uses: actions/upload-artifact@v3
+        with:
+          name: countydatasync-executable
+          path: dist/
+
+  backup:
+    name: Database Backup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Create Required Directories
+        run: |
+          mkdir -p output backup logs
+
+      - name: Run ETL with Test Data
+        env:
+          USE_TEST_DATA: "true"
+        run: |
+          python sync.py --test-data
+
+      - name: Run Backup Script
+        run: python backup_script.py
+
+      - name: Upload Backup Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: database-backups
+          path: backup/
+
+  # Deployment job - uncomment for automatic deployment
+  # deploy:
+  #   name: Deploy to Production Environment
+  #   runs-on: ubuntu-latest
+  #   needs: [etl-process, package]
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   
+  #   steps:
+  #     - name: Download ETL Artifacts
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: etl-output
+  #         path: etl-output
+  #     
+  #     - name: Download Executable
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: countydatasync-executable
+  #         path: executable
+  #     
+  #     - name: Deploy to Production
+  #       env:
+  #         DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+  #         DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+  #         DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+  #         DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+  #       run: |
+  #         # Setup SSH key
+  #         mkdir -p ~/.ssh
+  #         echo "$DEPLOY_KEY" > ~/.ssh/id_rsa
+  #         chmod 600 ~/.ssh/id_rsa
+  #         
+  #         # Copy ETL output and executable to production server
+  #         scp -r -o StrictHostKeyChecking=no etl-output/* $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/data/
+  #         scp -o StrictHostKeyChecking=no executable/CountyDataSync* $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/bin/
+  #         
+  #         # Run post-deployment scripts
+  #         ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "cd $DEPLOY_PATH && ./deploy_hooks/post_deploy.sh"
+  #         
+  #     - name: Send Deployment Notification
+  #       uses: slackapi/slack-github-action@v1.23.0
+  #       with:
+  #         payload: |
+  #           {
+  #             "text": "CountyDataSync deployed to production successfully!",
+  #             "blocks": [
+  #               {
+  #                 "type": "section",
+  #                 "text": {
+  #                   "type": "mrkdwn",
+  #                   "text": "*CountyDataSync Deployment Complete!*\n:white_check_mark: Version ${{ github.sha }} has been deployed to production."
+  #                 }
+  #               }
+  #             ]
+  #           }
+  #       env:
+  #         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  #         SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

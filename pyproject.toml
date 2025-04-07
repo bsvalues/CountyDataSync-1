@@ -20,5 +20,6 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "shapely>=2.1.0",
     "sqlalchemy>=2.0.40",
+    "trafilatura>=2.0.0",
     "werkzeug>=3.1.3",
 ]
