@@ -21,6 +21,28 @@ def get_memory_usage():
     memory_mb = memory_info.rss / 1024 / 1024
     return f"{memory_mb:.2f} MB"
 
+def get_memory_usage_value():
+    """
+    Get the current memory usage as a float value.
+    
+    Returns:
+        float: Memory usage in MB
+    """
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    memory_mb = memory_info.rss / 1024 / 1024
+    return memory_mb
+
+def get_cpu_usage():
+    """
+    Get the current CPU usage of the process.
+    
+    Returns:
+        float: CPU usage percentage (0-100)
+    """
+    process = psutil.Process(os.getpid())
+    return process.cpu_percent(interval=0.1)
+
 def format_elapsed_time(start_time):
     """
     Format the elapsed time in a human-readable format.

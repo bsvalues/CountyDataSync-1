@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Performance Dashboard - CountyDataSync ETL{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Performance Dashboard</h1>
+    <a href="/" class="btn btn-outline-secondary">Back to Dashboard</a>
+</div>
+
+<div class="row">
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">ETL Job Performance Overview</h5>
+            </div>
+            <div class="card-body">
+                <p><strong>Total Jobs:</strong> {{ total_jobs }}</p>
+                <p><strong>Average Processing Time:</strong> {{ avg_duration|round(2) }} seconds</p>
+                <p><strong>Average Record Count:</strong> {{ avg_records|round(0) }}</p>
+                <p><strong>Average Throughput:</strong> {{ avg_throughput|round(2) }} records/second</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">ETL Stage Breakdown</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Average Extraction Time: {{ avg_extraction_time|round(2) }} seconds ({{ avg_extraction_pct|round(1) }}%)</label>
+                    <div class="progress" role="progressbar" aria-valuenow="{{ avg_extraction_pct }}" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-bar bg-primary" style="width: {{ avg_extraction_pct }}%"></div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Average Transformation Time: {{ avg_transformation_time|round(2) }} seconds ({{ avg_transformation_pct|round(1) }}%)</label>
+                    <div class="progress" role="progressbar" aria-valuenow="{{ avg_transformation_pct }}" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-bar bg-info" style="width: {{ avg_transformation_pct }}%"></div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Average Loading Time: {{ avg_loading_time|round(2) }} seconds ({{ avg_loading_pct|round(1) }}%)</label>
+                    <div class="progress" role="progressbar" aria-valuenow="{{ avg_loading_pct }}" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-bar bg-success" style="width: {{ avg_loading_pct }}%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Recent Job Performance</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Job Name</th>
+                                <th>Records</th>
+                                <th>Duration (s)</th>
+                                <th>Throughput (rec/s)</th>
+                                <th>Memory (MB)</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for job in jobs %}
+                            <tr>
+                                <td>{{ job.job_name }}</td>
+                                <td>{{ job.record_count }}</td>
+                                <td>{{ job.duration() if job.end_time else 'N/A' }}</td>
+                                <td>{{ job.throughput()|round(2) if job.end_time and job.record_count else 'N/A' }}</td>
+                                <td>{{ job.peak_memory_usage|round(2) if job.peak_memory_usage else 'N/A' }}</td>
+                                <td><span class="badge job-status-{{ job.status }}">{{ job.status }}</span></td>
+                                <td><a href="{{ url_for('job_detail', job_id=job.id) }}" class="btn btn-sm btn-outline-primary">Details</a></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Performance Metrics Timeline</h5>
+            </div>
+            <div class="card-body">
+                <p class="mb-3">This chart shows the timeline of important performance metrics across all completed ETL jobs.</p>
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> For a detailed view of a specific job's performance metrics, click on the "Details" button in the table above.
+                </div>
+                {% if jobs|length > 0 %}
+                <div id="performance-chart" class="chart-container" style="height: 400px; width: 100%;"></div>
+                {% else %}
+                <div class="alert alert-warning">
+                    Not enough data to display performance metrics timeline.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if jobs|length > 0 %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Performance data
+    const jobLabels = [{% for job in jobs if job.end_time %}{% if not loop.first %}, {% endif %}"{{ job.job_name }}"{% endfor %}];
+    const throughputData = [{% for job in jobs if job.end_time %}{% if not loop.first %}, {% endif %}{{ job.throughput() }}{% endfor %}];
+    const memoryData = [{% for job in jobs if job.end_time and job.peak_memory_usage %}{% if not loop.first %}, {% endif %}{{ job.peak_memory_usage }}{% endfor %}];
+    
+    // Create chart
+    const ctx = document.getElementById('performance-chart').getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: jobLabels,
+            datasets: [
+                {
+                    label: 'Throughput (records/sec)',
+                    data: throughputData,
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Memory Usage (MB)',
+                    data: memoryData,
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: {
+                        display: true,
+                        text: 'Throughput (records/sec)'
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    title: {
+                        display: true,
+                        text: 'Memory Usage (MB)'
+                    },
+                    grid: {
+                        drawOnChartArea: false
+                    }
+                }
+            }
+        }
+    });
+});
+</script>
+{% endif %}
+{% endblock %}

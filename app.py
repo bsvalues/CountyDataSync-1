@@ -3,13 +3,14 @@ Flask web application for CountyDataSync ETL process.
 """
 import os
 import logging
+import time
 from datetime import datetime
 try:
     import pandas as pd
 except ImportError:
     # For development purposes, we'll handle missing pandas later
     pd = None
-from flask import Flask, render_template_string, request, redirect, url_for, flash, send_from_directory, session
+from flask import Flask, render_template_string, render_template, request, redirect, url_for, flash, send_from_directory, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -551,7 +552,7 @@ from etl.load import (
     create_stats_db, load_stats_data,
     create_working_db, load_working_data
 )
-from etl.utils import get_memory_usage, format_elapsed_time, check_file_size
+from etl.utils import get_memory_usage, get_memory_usage_value, get_cpu_usage, format_elapsed_time, check_file_size
 
 # Helper function to check allowed file extensions
 def allowed_file(filename):
@@ -582,7 +583,7 @@ def index():
         if job.working_db_path and os.path.exists(job.working_db_path):
             job.working_db_size = check_file_size(job.working_db_path)
     
-    return render_template_string(INDEX_TEMPLATE, jobs=jobs)
+    return render_template('index.html', jobs=jobs)
 
 @app.route('/new-job', methods=['GET', 'POST'])
 def new_job():
@@ -636,7 +637,7 @@ def new_job():
         # Start the ETL process
         return redirect(url_for('run_job', job_id=job.id))
     
-    return render_template_string(NEW_JOB_TEMPLATE)
+    return render_template('new_job.html')
 
 @app.route('/run-job/<int:job_id>')
 def run_job(job_id):
@@ -652,10 +653,11 @@ def run_job(job_id):
             # Run ETL from SQL Server
             logger.info(f"Starting ETL job {job.id} from SQL Server")
             
-            # Run the ETL process
-            output_files = run_etl()
+            # Run the ETL process with job ID for performance tracking
+            output = run_etl(job_id=job.id)
+            output_files = output.get('files', {})
             
-            # Update job with output paths and record count
+            # Update job with output paths
             if output_files:
                 job.geo_db_path = output_files.get('geo_db')
                 job.stats_db_path = output_files.get('stats_db')
@@ -664,6 +666,28 @@ def run_job(job_id):
         elif job.source_type == 'file_upload':
             # Run ETL from file upload
             logger.info(f"Starting ETL job {job.id} from file upload: {job.source_file}")
+            
+            # Create a PerformanceMetric for file upload job
+            from models import PerformanceMetric
+            
+            # Record performance metrics
+            start_time = time.time()
+            peak_memory = get_memory_usage_value()
+            
+            # Start extraction phase
+            extraction_start = time.time()
+            
+            # Create performance metric record for extraction start
+            metric = PerformanceMetric(
+                job_id=job.id,
+                stage='extraction',
+                memory_usage=get_memory_usage_value(),
+                cpu_usage=get_cpu_usage(),
+                elapsed_time=0,
+                description="Starting file extraction"
+            )
+            db.session.add(metric)
+            db.session.commit()
             
             # Load the file based on its extension
             file_extension = job.source_file.rsplit('.', 1)[1].lower()
@@ -674,23 +698,86 @@ def run_job(job_id):
             elif file_extension in ['xls', 'xlsx']:
                 df = pd.read_excel(job.source_file)
             
+            extraction_time = time.time() - extraction_start
+            current_memory = get_memory_usage_value()
+            peak_memory = max(peak_memory, current_memory)
+            
             if df is not None:
                 # Record count
-                job.record_count = len(df)
+                record_count = len(df)
+                job.record_count = record_count
+                
+                # Create performance metric record for extraction end
+                metric = PerformanceMetric(
+                    job_id=job.id,
+                    stage='extraction',
+                    memory_usage=current_memory,
+                    cpu_usage=get_cpu_usage(),
+                    elapsed_time=extraction_time,
+                    records_processed=record_count,
+                    description="File extraction completed"
+                )
+                db.session.add(metric)
+                db.session.commit()
+                
+                # Start transformation phase
+                transformation_start = time.time()
+                
+                # Create performance metric record for transformation start
+                metric = PerformanceMetric(
+                    job_id=job.id,
+                    stage='transformation',
+                    memory_usage=get_memory_usage_value(),
+                    cpu_usage=get_cpu_usage(),
+                    elapsed_time=time.time() - start_time,
+                    description="Starting transformation"
+                )
+                db.session.add(metric)
+                db.session.commit()
                 
                 # Transform data (adjust based on file structure)
                 # Note: This assumes the file has a 'geometry' column with WKT strings
                 if 'geometry' in df.columns:
                     gdf = transform_data(df)
                     
+                    transformation_time = time.time() - transformation_start
+                    current_memory = get_memory_usage_value()
+                    peak_memory = max(peak_memory, current_memory)
+                    
+                    # Create performance metric record for transformation end
+                    metric = PerformanceMetric(
+                        job_id=job.id,
+                        stage='transformation',
+                        memory_usage=current_memory,
+                        cpu_usage=get_cpu_usage(),
+                        elapsed_time=transformation_time,
+                        records_processed=record_count,
+                        description="Transformation completed"
+                    )
+                    db.session.add(metric)
+                    db.session.commit()
+                    
                     # Prepare data for target databases
                     stats_df = prepare_stats_data(gdf)
                     working_df = prepare_working_data(gdf)
                     
-                    # Load data into target databases
-                    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+                    # Start loading phase
+                    loading_start = time.time()
+                    
+                    # Create performance metric record for loading start
+                    metric = PerformanceMetric(
+                        job_id=job.id,
+                        stage='loading',
+                        memory_usage=get_memory_usage_value(),
+                        cpu_usage=get_cpu_usage(),
+                        elapsed_time=time.time() - start_time,
+                        description="Starting loading"
+                    )
+                    db.session.add(metric)
+                    db.session.commit()
                     
                     # Create unique output paths
+                    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
                     geo_db_path = os.path.join(OUTPUT_DIR, f"geo_db_{timestamp}.gpkg")
                     stats_db_path = os.path.join(OUTPUT_DIR, f"stats_db_{timestamp}.sqlite")
                     working_db_path = os.path.join(OUTPUT_DIR, f"working_db_{timestamp}.sqlite")
@@ -702,10 +789,31 @@ def run_job(job_id):
                     create_working_db(working_db_path)
                     load_working_data(working_df, working_db_path)
                     
-                    # Update job with output paths
+                    loading_time = time.time() - loading_start
+                    current_memory = get_memory_usage_value()
+                    peak_memory = max(peak_memory, current_memory)
+                    
+                    # Create performance metric record for loading end
+                    metric = PerformanceMetric(
+                        job_id=job.id,
+                        stage='loading',
+                        memory_usage=current_memory,
+                        cpu_usage=get_cpu_usage(),
+                        elapsed_time=loading_time,
+                        records_processed=record_count,
+                        description="Loading completed"
+                    )
+                    db.session.add(metric)
+                    db.session.commit()
+                    
+                    # Update job with output paths and performance metrics
                     job.geo_db_path = geo_db_path
                     job.stats_db_path = stats_db_path
                     job.working_db_path = working_db_path
+                    job.extraction_time = extraction_time
+                    job.transformation_time = transformation_time
+                    job.loading_time = loading_time
+                    job.peak_memory_usage = peak_memory
                 else:
                     raise ValueError("Input file does not contain a 'geometry' column with WKT strings")
             else:
@@ -732,6 +840,10 @@ def job_detail(job_id):
     # Get the job
     job = ETLJob.query.get_or_404(job_id)
     
+    # Get performance metrics
+    from models import PerformanceMetric
+    metrics = PerformanceMetric.query.filter_by(job_id=job.id).order_by(PerformanceMetric.timestamp).all()
+    
     # Get file sizes
     if job.geo_db_path and os.path.exists(job.geo_db_path):
         job.geo_db_size = check_file_size(job.geo_db_path)
@@ -740,7 +852,65 @@ def job_detail(job_id):
     if job.working_db_path and os.path.exists(job.working_db_path):
         job.working_db_size = check_file_size(job.working_db_path)
     
-    return render_template_string(JOB_DETAIL_TEMPLATE, job=job)
+    return render_template('job_detail.html', job=job, metrics=metrics)
+
+@app.route('/performance-dashboard')
+def performance_dashboard():
+    # Get all completed jobs
+    jobs = ETLJob.query.filter_by(status='completed').order_by(ETLJob.end_time.desc()).all()
+    
+    # Calculate averages for completed jobs with performance metrics
+    valid_jobs = [job for job in jobs if job.extraction_time and job.transformation_time and job.loading_time and job.record_count]
+    
+    if valid_jobs:
+        avg_extraction_time = sum(job.extraction_time for job in valid_jobs) / len(valid_jobs)
+        avg_transformation_time = sum(job.transformation_time for job in valid_jobs) / len(valid_jobs)
+        avg_loading_time = sum(job.loading_time for job in valid_jobs) / len(valid_jobs)
+        avg_duration = sum(job.duration() for job in valid_jobs) / len(valid_jobs)
+        avg_records = sum(job.record_count for job in valid_jobs) / len(valid_jobs)
+        avg_memory = sum(job.peak_memory_usage for job in valid_jobs if job.peak_memory_usage) / len(valid_jobs) if any(job.peak_memory_usage for job in valid_jobs) else 0
+        
+        # Calculate derived metrics
+        avg_throughput = sum(job.throughput() for job in valid_jobs if job.throughput()) / len(valid_jobs) if any(job.throughput() for job in valid_jobs) else 0
+        avg_memory_per_record = sum(job.peak_memory_usage / job.record_count for job in valid_jobs if job.peak_memory_usage and job.record_count) / len(valid_jobs) if any(job.peak_memory_usage and job.record_count for job in valid_jobs) else 0
+    else:
+        avg_extraction_time = 0
+        avg_transformation_time = 0
+        avg_loading_time = 0
+        avg_duration = 0
+        avg_records = 0
+        avg_memory = 0
+        avg_throughput = 0
+        avg_memory_per_record = 0
+    
+    # Calculate percentages for ETL stages
+    total_time = avg_extraction_time + avg_transformation_time + avg_loading_time
+    if total_time > 0:
+        avg_extraction_pct = (avg_extraction_time / total_time) * 100
+        avg_transformation_pct = (avg_transformation_time / total_time) * 100
+        avg_loading_pct = (avg_loading_time / total_time) * 100
+    else:
+        avg_extraction_pct = avg_transformation_pct = avg_loading_pct = 0
+        
+    # Get all jobs for stats
+    all_jobs = ETLJob.query.order_by(ETLJob.start_time.desc()).all()
+    total_jobs = len(all_jobs)
+    
+    return render_template('performance_dashboard.html', 
+                           jobs=valid_jobs,
+                           all_jobs=all_jobs,
+                           total_jobs=total_jobs,
+                           avg_extraction_time=avg_extraction_time,
+                           avg_transformation_time=avg_transformation_time,
+                           avg_loading_time=avg_loading_time,
+                           avg_extraction_pct=avg_extraction_pct,
+                           avg_transformation_pct=avg_transformation_pct,
+                           avg_loading_pct=avg_loading_pct,
+                           avg_duration=avg_duration,
+                           avg_records=avg_records,
+                           avg_memory=avg_memory,
+                           avg_throughput=avg_throughput,
+                           avg_memory_per_record=avg_memory_per_record)
 
 @app.route('/download/<path:filename>')
 def download_file(filename):
