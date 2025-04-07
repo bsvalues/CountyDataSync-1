@@ -1,0 +1,141 @@
+# CountyDataSync Packaging Guide
+
+This guide provides step-by-step instructions for packaging CountyDataSync as a standalone executable using PyInstaller.
+
+## Prerequisites
+
+1. Python 3.7+ installed
+2. All dependencies installed:
+   - pandas
+   - numpy
+   - geopandas
+   - pyodbc
+   - sqlalchemy
+   - shapely
+   - psutil
+   - python-dotenv
+   - flask
+   - PyInstaller (for packaging)
+
+## Step 1: Prepare Your Environment
+
+Run the readiness check to verify all prerequisites are met:
+
+```bash
+python check_packaging_readiness.py
+```
+
+If any issues are found, resolve them before proceeding.
+
+## Step 2: Create/Update the Spec File
+
+Generate a fresh spec file:
+
+```bash
+python generate_spec.py
+```
+
+This creates `countydatasync.spec` which defines how PyInstaller packages the application.
+
+## Step 3: Build the Executable
+
+Run the build script:
+
+```bash
+python build_executable.py
+```
+
+This will:
+1. Verify prerequisites
+2. Generate a spec file if needed
+3. Run PyInstaller with the spec file
+4. Create the executable in the `dist` directory
+
+## Step 4: Create Distribution Package
+
+Run the packaging script:
+
+```bash
+python package_application.py --version X.Y.Z
+```
+
+Where X.Y.Z is your version number (e.g., 1.0.0).
+
+This creates a zip file containing:
+- The executable
+- Configuration templates
+- Documentation
+- Required directories
+
+## Step 5: Test the Package
+
+Test the packaged executable:
+
+```bash
+python test_packaged_executable.py
+```
+
+This verifies that the executable runs correctly with test data.
+
+## Troubleshooting
+
+### If PyInstaller Fails
+
+1. Check disk space and memory resources
+2. Try with fewer hidden imports in the spec file
+3. Set PyInstaller to verbose mode in build_executable.py:
+   ```python
+   cmd = ['pyinstaller', '--clean', '--noconfirm', '--debug=all', spec_file]
+   ```
+
+### If the Executable Fails to Run
+
+1. Check the logs directory for error messages
+2. Verify that all required data files are included in the spec file
+3. Test on the same OS platform that you built on
+
+## Manual Packaging Steps
+
+If the automated scripts don't work, you can package manually:
+
+1. Create a spec file:
+   ```
+   pyi-makespec --onefile sync_executable.py
+   ```
+
+2. Edit the spec file to include:
+   - All required data files
+   - Hidden imports
+   - Icon file
+
+3. Build with PyInstaller:
+   ```
+   pyinstaller --clean --noconfirm countydatasync.spec
+   ```
+
+4. Create a distribution directory:
+   ```
+   mkdir -p CountyDataSync-dist/
+   cp dist/CountyDataSync* CountyDataSync-dist/
+   cp README.md INSTALLATION.md CountyDataSync-dist/
+   cp .env.example CountyDataSync-dist/
+   mkdir -p CountyDataSync-dist/logs CountyDataSync-dist/output
+   ```
+
+5. Create a zip file:
+   ```
+   zip -r CountyDataSync-dist.zip CountyDataSync-dist/
+   ```
+
+## Creating Installers
+
+For Windows, you can use tools like:
+- NSIS (Nullsoft Scriptable Install System)
+- Inno Setup
+- WiX Toolset
+
+For macOS, you can use:
+- DMG Canvas
+- create-dmg
+
+Example NSIS script is included in the `installers` directory.

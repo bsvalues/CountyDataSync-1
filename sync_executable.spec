@@ -3,34 +3,43 @@
 block_cipher = None
 
 a = Analysis(
-    ['sync.py'],  # Main script
+    ['sync_executable.py'],
     pathex=[],
     binaries=[],
     datas=[
-        ('etl', 'etl'),  # Include the etl package
-        ('.env.example', '.'),  # Include the example env file
+        ('etl', 'etl'),
+        ('config.py', '.'),
+        ('README.md', '.'),
+        ('logs', 'logs'),
+        ('output', 'output'),
+        ('.env.example', '.'),
     ],
     hiddenimports=[
-        'etl',
+        'pandas',
+        'numpy',
+        'pyodbc',
+        'geopandas',
+        'shapely',
+        'sqlite3',
+        'dotenv',
+        'psutil',
+        'etl.sync',
         'etl.extract',
         'etl.transform',
         'etl.load',
-        'etl.sync',
         'etl.utils',
-        'etl.test_data',
-        'pandas',
-        'geopandas',
-        'shapely',
-        'numpy',
-        'pyodbc',
-        'sqlalchemy',
-        'dotenv',
-        'psutil',
+        'etl.data_quality',
+        'etl.data_validation',
+        'etl.integrate_quality_heatmap',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'flask',  # Exclude web components for the standalone executable
+        'flask_sqlalchemy',
+        'werkzeug',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

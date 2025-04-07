@@ -46,6 +46,24 @@ CountyDataSync's primary goal is to extract data from a master SQL Server (the M
 
 ### Method 2: Run as a Standalone Executable
 
+#### Option A: Using the Packaging Script
+
+1. Install PyInstaller and dependencies:
+   ```
+   pip install pyinstaller pandas geopandas pyodbc sqlalchemy shapely psutil python-dotenv
+   ```
+2. Run the packaging readiness check:
+   ```
+   python check_packaging_readiness.py
+   ```
+3. Build the executable:
+   ```
+   python package_application.py --version 1.0.0
+   ```
+4. Find the packaged application in the created zip file (e.g., `CountyDataSync-1.0.0.zip`)
+
+#### Option B: Manual Packaging
+
 1. Install PyInstaller:
    ```
    pip install pyinstaller
@@ -54,7 +72,9 @@ CountyDataSync's primary goal is to extract data from a master SQL Server (the M
    ```
    python build_executable.py
    ```
-3. Find the executable in the `dist_package` directory
+3. Find the executable in the `dist` directory
+
+For detailed packaging instructions, refer to the [Packaging Guide](PACKAGING.md).
 
 ### Method 3: Use the CI/CD Pipeline
 
