@@ -9,10 +9,11 @@ This script creates backups of all databases used by CountyDataSync:
 
 The backups are timestamped and stored in a configurable backup directory.
 Older backups can be automatically pruned based on retention settings.
+Optional Azure Blob Storage backup is supported.
 
 Usage:
   python backup_script.py [--config CONFIG_PATH] [--backup-dir DIRECTORY]
-                         [--retention DAYS] [--verbose]
+                         [--retention DAYS] [--verbose] [--azure]
 """
 
 import os
@@ -25,7 +26,7 @@ import datetime
 import zipfile
 from pathlib import Path
 import configparser
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +47,11 @@ DEFAULT_CONFIG = {
         'geo_db': 'geo_db.gpkg',
         'stats_db': 'stats_db.sqlite',
         'working_db': 'working_db.sqlite'
+    },
+    'azure': {
+        'enabled': False,
+        'connection_string': '',
+        'container_name': 'countydata-backups'
     }
 }
 
@@ -56,6 +62,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--backup-dir', type=str, help='Directory to store backups')
     parser.add_argument('--retention', type=int, help='Number of days to retain backups')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
+    parser.add_argument('--azure', action='store_true', help='Enable Azure Blob Storage backup')
     return parser.parse_args()
 
 def load_config(config_path: str = None) -> Dict[str, Any]:
@@ -79,6 +86,15 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
                 for key in config['databases']:
                     if key in db_section:
                         config['databases'][key] = db_section[key]
+                        
+            if 'Azure' in config_parser:
+                azure_section = config_parser['Azure']
+                if 'enabled' in azure_section:
+                    config['azure']['enabled'] = azure_section.getboolean('enabled')
+                if 'connection_string' in azure_section:
+                    config['azure']['connection_string'] = azure_section['connection_string']
+                if 'container_name' in azure_section:
+                    config['azure']['container_name'] = azure_section['container_name']
                         
             logger.info(f"Loaded configuration from {config_path}")
         except Exception as e:
@@ -126,7 +142,7 @@ def create_backup_directory(backup_dir: str) -> str:
         logger.error(f"Error creating backup directory: {e}")
         raise
 
-def backup_database(db_path: str, backup_dir: str) -> str:
+def backup_database(db_path: str, backup_dir: str) -> Optional[str]:
     """Copy database file to backup directory."""
     if not os.path.exists(db_path):
         logger.warning(f"Database file not found: {db_path}")
@@ -142,7 +158,7 @@ def backup_database(db_path: str, backup_dir: str) -> str:
         logger.error(f"Error backing up database {db_path}: {e}")
         return None
 
-def create_archive(backup_dir: str) -> str:
+def create_archive(backup_dir: str) -> Optional[str]:
     """Create a ZIP archive of the backup directory."""
     try:
         archive_path = f"{backup_dir}.zip"
@@ -158,6 +174,47 @@ def create_archive(backup_dir: str) -> str:
     except Exception as e:
         logger.error(f"Error creating backup archive: {e}")
         return None
+
+def upload_to_azure(archive_path: str, azure_config: Dict[str, Any]) -> bool:
+    """Upload backup archive to Azure Blob Storage."""
+    if not azure_config.get('enabled', False):
+        logger.info("Azure Blob Storage backup is disabled")
+        return False
+    
+    if not azure_config.get('connection_string'):
+        logger.error("Azure connection string is missing")
+        return False
+    
+    try:
+        # Import Azure libraries only when needed
+        from azure.storage.blob import BlobServiceClient
+        
+        # Get blob service client
+        blob_service_client = BlobServiceClient.from_connection_string(
+            azure_config['connection_string']
+        )
+        
+        # Get container client
+        container_name = azure_config['container_name']
+        container_client = blob_service_client.get_container_client(container_name)
+        
+        # Create container if it doesn't exist
+        if not container_client.exists():
+            container_client.create_container()
+            logger.info(f"Created Azure container: {container_name}")
+        
+        # Upload backup archive
+        blob_name = os.path.basename(archive_path)
+        with open(archive_path, "rb") as data:
+            blob_client = container_client.upload_blob(name=blob_name, data=data, overwrite=True)
+            logger.info(f"Uploaded backup to Azure: {blob_name}")
+        return True
+    except ImportError:
+        logger.error("Azure Storage SDK not installed. Run: pip install azure-storage-blob")
+        return False
+    except Exception as e:
+        logger.error(f"Error uploading to Azure: {str(e)}")
+        return False
 
 def cleanup_old_backups(backup_dir: str, retention_days: int) -> None:
     """Remove backup directories and archives older than retention_days."""
@@ -190,6 +247,21 @@ def cleanup_old_backups(backup_dir: str, retention_days: int) -> None:
     except Exception as e:
         logger.error(f"Error cleaning up old backups: {e}")
 
+def generate_backup_report(success: bool, backup_results: Dict[str, Tuple[bool, str]]) -> str:
+    """Generate a backup health report."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    report = [
+        f"CountyDataSync Backup Report - {timestamp}",
+        f"Overall Status: {'SUCCESS' if success else 'FAILURE'}",
+        "\nDatabase Backup Results:",
+    ]
+    
+    for db_name, (db_success, message) in backup_results.items():
+        status = "✓" if db_success else "✗"
+        report.append(f"  {status} {db_name}: {message}")
+    
+    return "\n".join(report)
+
 def main() -> int:
     """Main backup function."""
     args = parse_arguments()
@@ -206,6 +278,8 @@ def main() -> int:
         config['backup_dir'] = args.backup_dir
     if args.retention:
         config['retention_days'] = args.retention
+    if args.azure:
+        config['azure']['enabled'] = True
         
     # Create main backup directory if it doesn't exist
     try:
@@ -222,6 +296,8 @@ def main() -> int:
         
     # Backup each database
     backup_success = True
+    backup_results = {}
+    
     for db_name, db_path in config['databases'].items():
         logger.info(f"Processing backup for {db_name}: {db_path}")
         
@@ -229,20 +305,46 @@ def main() -> int:
         if verify_database_integrity(db_path):
             # Backup the database
             backup_result = backup_database(db_path, backup_timestamp_dir)
-            if not backup_result:
+            if backup_result:
+                backup_results[db_name] = (True, "Successfully backed up")
+            else:
+                backup_results[db_name] = (False, "Backup failed")
                 backup_success = False
         else:
+            backup_results[db_name] = (False, "Integrity check failed")
             logger.error(f"Skipping backup of {db_name} due to integrity check failure")
             backup_success = False
     
     # Create a zip archive of the backup
+    archive_path = None
     if backup_success:
         archive_path = create_archive(backup_timestamp_dir)
         if not archive_path:
             backup_success = False
     
+    # Upload to Azure if enabled
+    azure_success = False
+    if backup_success and archive_path and config['azure']['enabled']:
+        azure_success = upload_to_azure(archive_path, config['azure'])
+        if azure_success:
+            logger.info("Successfully uploaded backup to Azure Blob Storage")
+        else:
+            logger.warning("Failed to upload backup to Azure Blob Storage")
+    
     # Clean up old backups
     cleanup_old_backups(config['backup_dir'], config['retention_days'])
+    
+    # Generate backup report
+    report = generate_backup_report(backup_success, backup_results)
+    logger.info("\n" + report)
+    
+    # Save report to file
+    report_path = os.path.join(config['backup_dir'], "last_backup_report.txt")
+    try:
+        with open(report_path, 'w') as f:
+            f.write(report)
+    except Exception as e:
+        logger.error(f"Failed to save backup report: {e}")
     
     if backup_success:
         logger.info("Backup process completed successfully")

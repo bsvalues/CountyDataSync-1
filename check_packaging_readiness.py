@@ -2,237 +2,185 @@
 # -*- coding: utf-8 -*-
 
 """
-Check system readiness for packaging CountyDataSync.
+Check packaging readiness for CountyDataSync
 
-This script verifies that all prerequisites are met for packaging the application.
+This script verifies that all required packages and tools are installed
+for packaging CountyDataSync as a standalone executable.
+
+Usage:
+    python check_packaging_readiness.py
 """
 
-import os
 import sys
-import platform
 import importlib
-import pkg_resources
+import subprocess
+import platform
+import os
+import shutil
 
+# Required Python packages
+REQUIRED_PACKAGES = [
+    'pandas',
+    'numpy',
+    'geopandas',
+    'pyodbc',
+    'sqlalchemy',
+    'shapely',
+    'psutil',
+    'python-dotenv',
+    'flask',
+    'pyinstaller'
+]
+
+# Required files for packaging
+REQUIRED_FILES = [
+    'main.py',
+    'build_executable.py',
+    'package_application.py'
+]
 
 def check_python_version():
-    """Check if Python version is compatible."""
-    print("\nChecking Python version...")
-    
-    min_version = (3, 7)
-    current_version = sys.version_info[:2]
-    
-    if current_version >= min_version:
-        print(f"✓ Python {'.'.join(map(str, current_version))} (meets minimum requirement of {'.'.join(map(str, min_version))})")
-        return True
-    else:
-        print(f"✗ Python {'.'.join(map(str, current_version))} (minimum requirement is {'.'.join(map(str, min_version))})")
+    """Check if Python version is adequate."""
+    print("\nChecking Python version:")
+    python_version = sys.version_info
+    if python_version.major < 3 or (python_version.major == 3 and python_version.minor < 7):
+        print(f"❌ Python 3.7+ is required. Current version: {sys.version}")
         return False
+    else:
+        print(f"✓ Python version is adequate: {sys.version}")
+        return True
 
+def check_packages():
+    """Check if all required packages are installed."""
+    print("\nChecking required packages:")
+    all_installed = True
+    missing_packages = []
+    
+    for package in REQUIRED_PACKAGES:
+        try:
+            importlib.import_module(package)
+            print(f"✓ {package} is installed")
+        except ImportError:
+            print(f"❌ {package} is missing")
+            missing_packages.append(package)
+            all_installed = False
+    
+    if not all_installed:
+        print("\nInstall missing packages with:")
+        print(f"  pip install {' '.join(missing_packages)}")
+    
+    return all_installed
 
 def check_pyinstaller():
-    """Check if PyInstaller is installed."""
-    print("\nChecking for PyInstaller...")
-    
+    """Check if PyInstaller is working properly."""
+    print("\nTesting PyInstaller:")
     try:
-        import PyInstaller
-        version = PyInstaller.__version__
-        print(f"✓ PyInstaller {version} is installed")
+        result = subprocess.run(['pyinstaller', '--version'], 
+                               capture_output=True, text=True, check=True)
+        version = result.stdout.strip()
+        print(f"✓ PyInstaller version: {version}")
         return True
-    except ImportError:
-        print("✗ PyInstaller is not installed")
-        print("  Install it with: pip install pyinstaller")
+    except (subprocess.SubprocessError, FileNotFoundError):
+        print("❌ PyInstaller is not working properly")
         return False
 
+def check_files():
+    """Check if required files for packaging exist."""
+    print("\nChecking required files:")
+    all_exist = True
+    
+    for file in REQUIRED_FILES:
+        if os.path.exists(file):
+            print(f"✓ {file} exists")
+        else:
+            print(f"❌ {file} is missing")
+            all_exist = False
+    
+    return all_exist
 
-def check_dependencies():
-    """Check if all required dependencies are installed."""
-    print("\nChecking required dependencies...")
+def check_installer_tools():
+    """Check if installer creation tools are available."""
+    print("\nChecking installer tools:")
+    sys_platform = platform.system()
     
-    # Override the check - we've verified that all dependencies are installed
-    # but there might be naming discrepancies between pip package names
-    # and import names.
-    print("All required dependencies are available in the environment.")
-    return True
-
-
-def check_project_structure():
-    """Check if the project structure is valid for packaging."""
-    print("\nChecking project structure...")
+    if sys_platform == 'Windows':
+        nsis_path = shutil.which('makensis')
+        if nsis_path:
+            print(f"✓ NSIS found: {nsis_path}")
+            return True
+        else:
+            print("ℹ️ NSIS not found. Install from https://nsis.sourceforge.io/ to create Windows installers")
+            return False
     
-    required_files = [
-        'sync_executable.py',  # Main entry point for PyInstaller
-        'main.py',             # Main application module
-        'app.py',              # Flask application
-        'models.py',           # Database models
-    ]
+    elif sys_platform == 'Darwin':  # macOS
+        create_dmg_path = shutil.which('create-dmg')
+        if create_dmg_path:
+            print(f"✓ create-dmg found: {create_dmg_path}")
+            return True
+        else:
+            print("ℹ️ create-dmg not found. Install with 'brew install create-dmg' to create macOS installers")
+            return False
     
-    required_dirs = [
-        'etl',                 # ETL modules
-        'templates',           # Flask templates
-        'static',              # Static files
-    ]
-    
-    # Check required files
-    missing_files = []
-    for file in required_files:
-        if not os.path.isfile(file):
-            missing_files.append(file)
-    
-    # Check required directories
-    missing_dirs = []
-    for dir_name in required_dirs:
-        if not os.path.isdir(dir_name):
-            missing_dirs.append(dir_name)
-    
-    # Print results
-    if not missing_files and not missing_dirs:
-        print("✓ Project structure is valid")
+    else:  # Linux
+        print("ℹ️ No specific installer tool check for Linux")
         return True
+
+def check_azure_tools():
+    """Check if Azure deployment tools are available."""
+    print("\nChecking Azure tools:")
+    
+    az_cli_path = shutil.which('az')
+    if az_cli_path:
+        try:
+            # Get Azure CLI version
+            result = subprocess.run(['az', '--version'], 
+                                   capture_output=True, text=True, check=True)
+            print(f"✓ Azure CLI is installed")
+            return True
+        except (subprocess.SubprocessError, FileNotFoundError):
+            print("❌ Azure CLI is installed but not working properly")
+            return False
     else:
-        if missing_files:
-            print("Missing required files:")
-            for file in missing_files:
-                print(f"  ✗ {file}")
-        
-        if missing_dirs:
-            print("Missing required directories:")
-            for dir_name in missing_dirs:
-                print(f"  ✗ {dir_name}")
-        
+        print("ℹ️ Azure CLI not found. Install it to deploy to Azure")
         return False
-
-
-def check_packaging_tools():
-    """Check if packaging script and spec files exist."""
-    print("\nChecking packaging tools...")
-    
-    packaging_files = [
-        ('build_executable.py', False),      # Build script
-        ('generate_spec.py', False),         # Spec generator
-        ('package_application.py', False),   # Package creator
-        ('countydatasync.spec', True),       # PyInstaller spec file (optional)
-    ]
-    
-    missing_required = []
-    missing_optional = []
-    
-    for file, optional in packaging_files:
-        if not os.path.isfile(file):
-            if optional:
-                missing_optional.append(file)
-            else:
-                missing_required.append(file)
-    
-    # Print results
-    if not missing_required:
-        print("✓ Required packaging tools are present")
-        if missing_optional:
-            print("  Note: Some optional files are missing, but they will be generated:")
-            for file in missing_optional:
-                print(f"    - {file}")
-        return True
-    else:
-        print("✗ Missing required packaging tools:")
-        for file in missing_required:
-            print(f"  - {file}")
-        return False
-
-
-def check_icon():
-    """Check if icon file exists or can be generated."""
-    print("\nChecking for application icon...")
-    
-    icon_file = 'generated-icon.png'
-    icon_generator = 'generate_icon.py'
-    
-    if os.path.isfile(icon_file):
-        print(f"✓ Icon file exists: {icon_file}")
-        return True
-    elif os.path.isfile(icon_generator):
-        print(f"✓ Icon will be generated using {icon_generator}")
-        return True
-    else:
-        print(f"✗ Icon file {icon_file} is missing and cannot be generated")
-        print(f"  Create an icon file or add {icon_generator} script")
-        return False
-
-
-def check_documentation():
-    """Check if documentation files exist."""
-    print("\nChecking documentation files...")
-    
-    doc_files = [
-        ('README.md', False),           # Required
-        ('INSTALLATION.md', False),     # Required
-        ('PACKAGING.txt', True),        # Optional
-    ]
-    
-    missing_required = []
-    missing_optional = []
-    
-    for file, optional in doc_files:
-        if not os.path.isfile(file):
-            if optional:
-                missing_optional.append(file)
-            else:
-                missing_required.append(file)
-    
-    # Print results
-    if not missing_required:
-        print("✓ Required documentation files are present")
-        if missing_optional:
-            print("  Note: Some optional documentation files are missing:")
-            for file in missing_optional:
-                print(f"    - {file}")
-        return True
-    else:
-        print("✗ Missing required documentation files:")
-        for file in missing_required:
-            print(f"  - {file}")
-        return False
-
 
 def main():
-    """Main entry point."""
+    """Main function to check packaging readiness."""
     print("=" * 60)
     print("CountyDataSync Packaging Readiness Check")
     print("=" * 60)
-    print(f"System: {platform.system()} {platform.release()} ({platform.architecture()[0]})")
-    print(f"Python: {platform.python_version()}")
     
-    # Run checks
     checks = [
-        ("Python version", check_python_version),
-        ("PyInstaller", check_pyinstaller),
-        ("Dependencies", check_dependencies),
-        ("Project structure", check_project_structure),
-        ("Packaging tools", check_packaging_tools),
-        ("Application icon", check_icon),
-        ("Documentation", check_documentation),
+        ("Python version", check_python_version()),
+        ("Required packages", check_packages()),
+        ("PyInstaller", check_pyinstaller()),
+        ("Required files", check_files()),
+        ("Installer tools", check_installer_tools()),
+        ("Azure tools", check_azure_tools())
     ]
     
-    results = {}
-    for name, check_func in checks:
-        results[name] = check_func()
-    
-    # Print summary
+    # Summary
     print("\n" + "=" * 60)
-    print("Summary")
-    print("=" * 60)
+    print("Summary:")
+    all_required_ok = True
     
-    all_passed = True
-    for name, passed in results.items():
-        status = "PASS" if passed else "FAIL"
-        all_passed = all_passed and passed
-        print(f"{name}: {status}")
+    for name, result in checks:
+        if name in ["Python version", "Required packages", "PyInstaller", "Required files"]:
+            if not result:
+                all_required_ok = False
+            status = "✓" if result else "❌"
+        else:
+            status = "✓" if result else "ℹ️"
+            
+        print(f"{status} {name}")
     
-    if all_passed:
-        print("\n✅ System is ready for packaging!")
+    print("\nVerdict:", end=" ")
+    if all_required_ok:
+        print("✅ Ready for packaging! All required components are available.")
         return 0
     else:
-        print("\n❌ Some checks failed. Fix the issues before packaging.")
+        print("❌ Not ready for packaging. Please fix the issues above.")
         return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -94,3 +94,79 @@ See the [CI/CD Guide](CI_CD_GUIDE.md) for detailed information on setting up and
 
 Before running the ETL process, you need to configure the connection to your SQL Server and output settings. Copy the `.env.example` file to `.env` and edit it with your specific settings:
 
+# CountyDataSync Backup Tool
+
+A comprehensive backup solution for CountyDataSync databases with optional Azure Blob Storage support.
+
+## Features
+
+- Backs up multiple database types (SQLite, GeoPackage)
+- Performs integrity checks before backup
+- Creates compressed archives of backups
+- Supports local storage and Azure Blob Storage
+- Configurable retention policy for automatic cleanup
+- Detailed logging and reporting
+
+## Installation
+
+1. Ensure Python 3.6+ is installed
+2. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+3. Copy `config.ini.example` to `config.ini` and modify as needed
+
+## Usage
+
+Basic usage:
+```
+python backup_script.py
+```
+
+With options:
+```
+python backup_script.py --config /path/to/config.ini --backup-dir /path/to/backups --retention 30 --verbose --azure
+```
+
+Options:
+- `--config`: Path to configuration file (defaults to built-in defaults)
+- `--backup-dir`: Directory to store backups
+- `--retention`: Number of days to retain backups (0 to disable cleanup)
+- `--verbose`: Enable verbose logging
+- `--azure`: Enable Azure Blob Storage backup
+
+## Azure Blob Storage Setup
+
+To enable Azure Blob Storage backup:
+
+1. Create an Azure Storage account
+2. Get your connection string from the Azure Portal
+3. Add it to your config.ini file
+4. Set `enabled = true` in the Azure section
+
+## Deployment Recommendations
+
+### Running as a Scheduled Task (Windows)
+
+1. Open Task Scheduler
+2. Create a Basic Task
+3. Set trigger (e.g., daily at 2 AM)
+4. Action: Start a program
+5. Program/script: `python`
+6. Arguments: `/path/to/backup_script.py --config /path/to/config.ini`
+
+### Running as a Cron Job (Linux)
+
+Add to crontab:
+```
+0 2 * * * /usr/bin/python3 /path/to/backup_script.py --config /path/to/config.ini
+```
+
+### Running in Docker
+
+A Dockerfile is available in the repository. Build and run:
+```
+docker build -t countydatasync-backup .
+docker run -v /path/to/data:/app/data -v /path/to/backups:/app/backups countydatasync-backup
+```
+

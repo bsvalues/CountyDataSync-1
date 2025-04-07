@@ -1,0 +1,5 @@
+# Core dependencies
+configparser>=5.0.0
+
+# Azure Storage dependencies (optional)
+azure-storage-blob>=12.8.0

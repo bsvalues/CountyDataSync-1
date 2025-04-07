@@ -1,0 +1,13 @@
+[Backup]
+backup_dir = backups
+retention_days = 30
+
+[Databases]
+geo_db = geo_db.gpkg
+stats_db = stats_db.sqlite
+working_db = working_db.sqlite
+
+[Azure]
+enabled = false
+connection_string = DefaultEndpointsProtocol=https;AccountName=youraccount;AccountKey=yourkey;EndpointSuffix=core.windows.net
+container_name = countydata-backups
